@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Soft Meta Chatterbox TTS Server</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>Soft Meta Chatterbox TTS Server</h1>
+      <p>Voice cloning, long-form generation and multi-audio queue</p>
+    </div>
+    <button id="theme-toggle" class="icon-button" type="button" aria-label="Toggle theme">◐</button>
+  </header>
+
+  <main class="page-shell">
+    <section class="model-card card">
+      <div class="model-grid">
+        <div>
+          <label for="active-model">Active Model</label>
+          <select id="active-model"></select>
+        </div>
+        <div class="status-box">
+          <span id="model-dot" class="status-dot"></span>
+          <div>
+            <strong id="model-status">Checking model...</strong>
+            <small id="device-status"></small>
+          </div>
+        </div>
+        <button id="load-model" class="secondary-button" type="button">Load Model</button>
+      </div>
+    </section>
+
+    <section class="workspace-card card">
+      <div id="audio-tabs" class="audio-tabs" role="tablist"></div>
+      <div class="global-actions">
+        <button id="generate-all" class="primary-button" type="button">Generate All</button>
+        <button id="open-monitor" class="secondary-button" type="button">Audio Queue Monitor</button>
+      </div>
+      <div id="audio-panels"></div>
+    </section>
+  </main>
+
+  <div id="progress-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-card">
+      <div class="modal-head">
+        <div>
+          <h2>Audio Queue Monitor</h2>
+          <p>Jobs run one at a time to protect GPU memory.</p>
+        </div>
+        <div class="modal-actions">
+          <button id="minimise-monitor" class="secondary-button" type="button">Minimise</button>
+          <button id="close-monitor" class="icon-button" type="button">×</button>
+        </div>
+      </div>
+      <div id="queue-list" class="queue-list"></div>
+      <audio id="monitor-player" class="monitor-player" controls preload="metadata"></audio>
+    </div>
+  </div>
+
+  <button id="floating-progress" class="floating-progress hidden" type="button"></button>
+  <div id="toast-root" class="toast-root"></div>
+
+  <template id="audio-panel-template">
+    <article class="audio-panel">
+      <div class="field">
+        <label>Video Title</label>
+        <input data-field="title" type="text" maxlength="180" placeholder="Enter a title for filenames and identification">
+      </div>
+
+      <div class="field">
+        <div class="label-row"><label>Script</label><span data-role="word-count">0 words</span></div>
+        <textarea data-field="text" rows="11" placeholder="Paste your script here..."></textarea>
+      </div>
+
+      <div class="form-grid three">
+        <div class="field">
+          <label>Load Example Preset</label>
+          <select data-field="preset"></select>
+        </div>
+        <div class="field">
+          <label>Language</label>
+          <select data-field="language">
+            <option value="en">US English</option>
+            <option value="es">Spanish</option><option value="fr">French</option>
+            <option value="de">German</option><option value="it">Italian</option>
+            <option value="pt">Portuguese</option><option value="hi">Hindi</option>
+            <option value="ja">Japanese</option><option value="ko">Korean</option>
+            <option value="zh">Chinese</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Voice Mode</label>
+          <select data-field="voice_mode">
+            <option value="default">Model default voice</option>
+            <option value="predefined">Predefined voice</option>
+            <option value="clone">Clone uploaded voice</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="voice-row">
+        <div class="field grow">
+          <label>Voice</label>
+          <select data-field="voice_filename"></select>
+        </div>
+        <label class="upload-button">Upload Voice<input data-role="voice-upload" type="file" accept="audio/*" hidden></label>
+        <button data-action="preview-voice" class="secondary-button" type="button">Preview Voice</button>
+      </div>
+      <audio data-role="voice-player" controls preload="metadata"></audio>
+      <p class="hint">For genuine American delivery, use a clean 10–20 second American-accent reference recording. Settings cannot reliably replace the reference speaker’s accent.</p>
+
+      <details class="settings-panel">
+        <summary>Generation Parameters</summary>
+        <div class="form-grid four compact">
+          <div class="field"><label>Temperature</label><input data-field="temperature" type="number" step="0.05" min="0.05" max="2"></div>
+          <div class="field"><label>Exaggeration</label><input data-field="exaggeration" type="number" step="0.05" min="0" max="2"></div>
+          <div class="field"><label>CFG Weight</label><input data-field="cfg_weight" type="number" step="0.05" min="0" max="1"></div>
+          <div class="field"><label>Speed</label><input data-field="speed_factor" type="number" step="0.05" min="0.5" max="2"></div>
+          <div class="field"><label>Seed</label><input data-field="seed" type="number" min="0"></div>
+          <div class="field"><label>Chunk words</label><input data-field="chunk_words" type="number" min="25" max="250"></div>
+          <label class="check-field"><input data-field="split_text" type="checkbox"> Split long text safely</label>
+        </div>
+      </details>
+
+      <button data-action="generate" class="primary-button full-button" type="button"></button>
+
+      <section data-role="generated" class="generated-section hidden">
+        <div class="section-head">
+          <div><h3>Generated Audio</h3><p data-role="generated-title"></p></div>
+          <a data-role="download-original" class="secondary-button link-button" download>Download WAV</a>
+        </div>
+        <audio data-role="main-player" controls preload="metadata"></audio>
+        <div data-role="wave-status" class="hint"></div>
+        <div class="wave-toolbar">
+          <button data-action="zoom-out" class="tiny-button" type="button">Zoom Out</button>
+          <button data-action="fit-wave" class="tiny-button" type="button">Fit All</button>
+          <button data-action="zoom-in" class="tiny-button" type="button">Zoom In</button>
+          <button data-action="set-start-mode" class="tiny-button" type="button">Click Sets Start</button>
+          <button data-action="set-end-mode" class="tiny-button active" type="button">Click Sets End</button>
+        </div>
+        <div data-role="wave-scroll" class="wave-scroll"><canvas data-role="wave-canvas" height="150"></canvas><div data-role="wave-tooltip" class="wave-tooltip hidden"></div></div>
+        <div class="time-readout"><span>Mouse: <strong data-role="mouse-time">0:00.0</strong></span><span>Selected: <strong data-role="selected-time">0:00.0</strong></span></div>
+
+        <div class="cutter card-inner">
+          <h3>Cut Generated Audio</h3>
+          <div class="quick-cuts">
+            <span>Keep first:</span>
+            <button data-quick="120" type="button">2 min</button><button data-quick="150" type="button">2:30</button>
+            <button data-quick="180" type="button">3 min</button><button data-quick="210" type="button">3:30</button>
+            <button data-quick="240" type="button">4 min</button><button data-quick="270" type="button">4:30</button>
+            <button data-quick="300" type="button">5 min</button>
+          </div>
+          <div class="form-grid two">
+            <div class="field"><label>Start time</label><input data-field="cut_start" type="text" value="0:00"></div>
+            <div class="field"><label>End time</label><input data-field="cut_end" type="text" value=""></div>
+          </div>
+          <div class="cut-summary"><span data-role="selected-duration"></span><span data-role="removed-duration"></span></div>
+          <div class="cut-actions">
+            <button data-action="use-end-start" class="secondary-button" type="button">Use Current End as Next Start</button>
+            <button data-action="preview-selected" class="secondary-button" type="button">Preview Selected</button>
+            <button data-action="download-selected" class="primary-button" type="button">Download Selected WAV</button>
+            <button data-action="download-part-one" class="secondary-button" type="button">Download Part 1</button>
+            <button data-action="download-part-two" class="secondary-button" type="button">Download Part 2</button>
+          </div>
+        </div>
+      </section>
+    </article>
+  </template>
+
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

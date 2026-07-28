@@ -1,0 +1,17 @@
+services:
+  chatterbox-tts-server:
+    build: .
+    ports:
+      - "8004:8004"
+    volumes:
+      - ./voices:/app/voices
+      - ./reference_audio:/app/reference_audio
+      - ./outputs:/app/outputs
+      - ./data:/app/data
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
