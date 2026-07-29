@@ -32,7 +32,7 @@ from utils import safe_filename
 from voice_designer import VoiceDesigner
 
 APP_NAME = "SoftMeta Chatterbox TTS Server"
-APP_VERSION = "0.5.1"
+APP_VERSION = "0.5.2"
 logger = logging.getLogger("softmeta.chatterbox")
 
 config = load_config()

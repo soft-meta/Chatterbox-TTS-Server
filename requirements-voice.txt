@@ -6,3 +6,4 @@ speechbrain==1.0.3
 soundfile==0.13.1
 scipy==1.15.3
 setuptools==80.9.0
+huggingface-hub==0.36.0

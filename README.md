@@ -1,10 +1,18 @@
 # SoftMeta Chatterbox TTS Server
 
+## v0.5.2 model snapshot fix
+
+- Pins the complete official Qwen3-TTS VoiceDesign revision.
+- Uses a validated local model snapshot to avoid stale Hugging Face cache files.
+- Installs SoX for the isolated Qwen environment.
+- Use `colab/SoftMeta_Chatterbox_TTS_Colab_v0.5.2.ipynb`.
+
+
 ## v0.5.1 hotfix
 
 - Fixed the Qwen3-TTS Colab verification cell syntax error.
 - No engine, UI workflow, or voice-generation behaviour was changed.
-- Use `colab/SoftMeta_Chatterbox_TTS_Colab_v0.5.1.ipynb`.
+- Use `colab/SoftMeta_Chatterbox_TTS_Colab_v0.5.2.ipynb`.
 
 A professional, self-hosted speech studio maintained by **SoftMeta**. The server,
 queue, browser UI, waveform tools and audio editor are SoftMeta code. Chatterbox
@@ -52,7 +60,7 @@ model-generated approximations, so listen before saving.
 ```text
 soft-meta/chatterbox-v2@v0.2.1
         ↓
-soft-meta/Chatterbox-TTS-Server@v0.5.1
+soft-meta/Chatterbox-TTS-Server@v0.5.2
         ↓
 Google Colab L4, local Python or Docker
 ```
@@ -61,7 +69,7 @@ This project has no runtime dependency on Devnen repositories.
 
 ## Google Colab
 
-Open `colab/SoftMeta_Chatterbox_TTS_Colab_v0.5.1.ipynb`, select an L4 GPU and
+Open `colab/SoftMeta_Chatterbox_TTS_Colab_v0.5.2.ipynb`, select an L4 GPU and
 run all cells. The notebook creates two isolated environments:
 
 - Chatterbox main server environment

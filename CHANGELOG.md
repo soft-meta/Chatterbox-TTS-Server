@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.5.2
+
+- Pinned a complete official Qwen3-TTS VoiceDesign model revision
+- Added dedicated local snapshot download and required-file validation
+- Fixed stale speech-tokenizer feature extractor cache failures
+- Installed SoX in the Colab environment
+- Fixed the current server-log path
+
+
 ## v0.5.1
 
 - Fixed an unterminated Python string in the Qwen3-TTS Colab environment verification cell.

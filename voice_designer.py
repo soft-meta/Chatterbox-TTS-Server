@@ -44,6 +44,7 @@ class VoiceDesigner:
     """
 
     MODEL_ID = "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
+    MODEL_REVISION = "fa0251e3279a10b4936dc49d69a59c41b07cbfc0"
     RESULT_PREFIX = "SOFTMETA_RESULT="
 
     _MALE_PITCH = (
@@ -110,6 +111,7 @@ class VoiceDesigner:
         python_executable: str | None = None,
         worker_path: Path | None = None,
         timeout_seconds: int = 2700,
+        model_cache_dir: Path | None = None,
     ) -> None:
         self.output_dir = output_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -123,6 +125,10 @@ class VoiceDesigner:
         )
         self.worker_path = worker_path or Path(__file__).with_name("voice_worker.py")
         self.timeout_seconds = timeout_seconds
+        self.model_cache_dir = model_cache_dir or Path(
+            os.getenv("SOFTMETA_QWEN_MODEL_DIR", "/content/softmeta_models/qwen3_voice_design")
+        )
+        self.model_cache_dir.mkdir(parents=True, exist_ok=True)
         self._lock = RLock()
 
     @staticmethod
@@ -297,6 +303,8 @@ class VoiceDesigner:
             ]
             request = {
                 "model_id": self.MODEL_ID,
+                "model_revision": self.MODEL_REVISION,
+                "model_cache_dir": str(self.model_cache_dir),
                 "name": name.strip(),
                 "sample_text": sample_text.strip(),
                 "base_seed": int(seed),
@@ -405,6 +413,7 @@ class VoiceDesigner:
                     "saved_at": time.time(),
                     "source": "Qwen3-TTS VoiceDesign",
                     "model_id": self.MODEL_ID,
+                    "model_revision": self.MODEL_REVISION,
                 }
             )
             destination.with_suffix(".json").write_text(

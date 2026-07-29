@@ -4,6 +4,7 @@ import argparse
 import gc
 import json
 import math
+import os
 import random
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,18 @@ import soundfile as sf
 import torch
 
 RESULT_PREFIX = "SOFTMETA_RESULT="
+DEFAULT_MODEL_REVISION = "fa0251e3279a10b4936dc49d69a59c41b07cbfc0"
+REQUIRED_MODEL_FILES = (
+    "config.json",
+    "generation_config.json",
+    "preprocessor_config.json",
+    "tokenizer_config.json",
+    "model.safetensors",
+    "speech_tokenizer/config.json",
+    "speech_tokenizer/configuration.json",
+    "speech_tokenizer/preprocessor_config.json",
+    "speech_tokenizer/model.safetensors",
+)
 
 
 def load_request(path: Path) -> dict[str, Any]:
@@ -51,6 +64,66 @@ def normalise_audio(audio: np.ndarray) -> np.ndarray:
     if peak > 0.98:
         audio = audio * (0.96 / peak)
     return audio
+
+
+def resolve_verified_model_snapshot(data: dict[str, Any]) -> Path:
+    """Download and validate the exact official VoiceDesign snapshot.
+
+    Qwen3TTSModel loads its processor from the same local directory as the
+    model. Using a verified local snapshot prevents an older partial Hub cache
+    from omitting speech_tokenizer/preprocessor_config.json.
+    """
+
+    try:
+        from huggingface_hub import snapshot_download
+    except Exception as error:
+        raise RuntimeError(
+            "huggingface-hub is required to prepare the verified Qwen3-TTS model snapshot. "
+            f"Original error: {type(error).__name__}: {error}"
+        ) from error
+
+    model_id = str(data["model_id"])
+    revision = str(data.get("model_revision") or DEFAULT_MODEL_REVISION)
+    cache_root = Path(
+        str(
+            data.get("model_cache_dir")
+            or os.getenv("SOFTMETA_QWEN_MODEL_DIR")
+            or "/content/softmeta_models/qwen3_voice_design"
+        )
+    ).resolve()
+    local_dir = cache_root / revision[:12]
+    local_dir.mkdir(parents=True, exist_ok=True)
+
+    missing = [name for name in REQUIRED_MODEL_FILES if not (local_dir / name).is_file()]
+    if missing:
+        print(
+            "Preparing verified Qwen3-TTS VoiceDesign snapshot "
+            f"{revision[:12]}... This first download is several gigabytes."
+        )
+        try:
+            snapshot_download(
+                repo_id=model_id,
+                revision=revision,
+                local_dir=str(local_dir),
+                max_workers=4,
+            )
+        except Exception as error:
+            raise RuntimeError(
+                "The verified Qwen3-TTS VoiceDesign snapshot could not be downloaded. "
+                f"Model: {model_id} Revision: {revision}. "
+                f"Original error: {type(error).__name__}: {error}"
+            ) from error
+
+    missing = [name for name in REQUIRED_MODEL_FILES if not (local_dir / name).is_file()]
+    if missing:
+        raise RuntimeError(
+            "The downloaded Qwen3-TTS snapshot is incomplete. Missing: "
+            + ", ".join(missing)
+            + ". Delete the local Qwen model directory and try again."
+        )
+
+    print(f"Verified Qwen3-TTS model snapshot: {local_dir}")
+    return local_dir
 
 
 def load_embedding_model():
@@ -189,11 +262,12 @@ def generate_candidates(data: dict[str, Any]) -> dict[str, Any]:
     sample_text = str(data["sample_text"]).strip()
     threshold = float(data.get("uniqueness_threshold", 0.78))
 
+    model_path = resolve_verified_model_snapshot(data)
     model = None
     candidates: list[dict[str, Any]] = []
     try:
         model = Qwen3TTSModel.from_pretrained(
-            str(data["model_id"]),
+            str(model_path),
             device_map=device,
             dtype=dtype,
             attn_implementation="sdpa",
@@ -223,6 +297,7 @@ def generate_candidates(data: dict[str, Any]) -> dict[str, Any]:
                 "seed": candidate_seed,
                 "sample_text": sample_text,
                 "model_id": str(data["model_id"]),
+                "model_revision": str(data.get("model_revision") or DEFAULT_MODEL_REVISION),
                 "source": "Qwen3-TTS VoiceDesign",
                 **profile,
             }
@@ -268,6 +343,7 @@ def generate_candidates(data: dict[str, Any]) -> dict[str, Any]:
         "ok": True,
         "session_id": str(data["session_id"]),
         "model_id": str(data["model_id"]),
+        "model_revision": str(data.get("model_revision") or DEFAULT_MODEL_REVISION),
         "candidate_count": len(candidates),
         "candidates": candidates,
         "uniqueness_threshold": threshold,
