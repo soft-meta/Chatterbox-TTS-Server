@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -9,8 +10,8 @@ from typing import Any
 
 import numpy as np
 import soundfile as sf
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from config import ROOT, load_config
@@ -26,15 +27,47 @@ from queue_manager import QueueManager
 from storage import AUDIO_EXTENSIONS, Storage
 from utils import safe_filename
 
+APP_NAME = "SoftMeta Chatterbox TTS Server"
+APP_VERSION = "0.2.0"
+logger = logging.getLogger("softmeta.chatterbox")
+
 config = load_config()
 storage = Storage()
 engine = EngineService(device=config["tts_engine"]["device"])
 queue = QueueManager(engine=engine, storage=storage)
+model_load_task: asyncio.Task | None = None
+
+MODELS = [
+    {
+        "id": "chatterbox",
+        "name": "Chatterbox Original (English)",
+        "badge": "Original",
+        "description": "Expressive English narration and voice cloning.",
+    },
+    {
+        "id": "chatterbox-turbo",
+        "name": "Chatterbox Turbo (English)",
+        "badge": "Turbo",
+        "description": "Faster English generation when supported by the installed engine.",
+    },
+    {
+        "id": "chatterbox-nano",
+        "name": "Chatterbox Nano (English)",
+        "badge": "Nano",
+        "description": "Compact English model when supported by the installed engine.",
+    },
+    {
+        "id": "chatterbox-multilingual",
+        "name": "Chatterbox Multilingual",
+        "badge": "Multilingual",
+        "description": "Multilingual generation when supported by the installed engine.",
+    },
+]
 
 PRESETS = [
     {
         "name": "Motivational Speech",
-        "description": "Natural US-English motivational narration with controlled emotion.",
+        "description": "Warm, expressive narration for clear US-English motivational delivery.",
         "language": "en",
         "temperature": 0.8,
         "exaggeration": 0.65,
@@ -47,10 +80,11 @@ PRESETS = [
         "seed": 2025,
         "split_text": True,
         "chunk_words": 90,
+        "output_format": "wav",
     },
     {
         "name": "Natural Conversation",
-        "description": "Balanced, calm delivery for general narration.",
+        "description": "Balanced, calm and natural delivery for general narration.",
         "language": "en",
         "temperature": 0.8,
         "exaggeration": 0.5,
@@ -63,69 +97,135 @@ PRESETS = [
         "seed": 2025,
         "split_text": True,
         "chunk_words": 90,
+        "output_format": "wav",
+    },
+    {
+        "name": "Calm Storytelling",
+        "description": "Measured delivery with gentle emotion for long-form stories.",
+        "language": "en",
+        "temperature": 0.75,
+        "exaggeration": 0.45,
+        "cfg_weight": 0.45,
+        "repetition_penalty": 1.2,
+        "min_p": 0.05,
+        "top_p": 1.0,
+        "top_k": 1000,
+        "speed_factor": 0.96,
+        "seed": 2025,
+        "split_text": True,
+        "chunk_words": 85,
+        "output_format": "wav",
     },
 ]
 
 
+async def _load_model_in_background(model_name: str) -> None:
+    global model_load_task
+    try:
+        await asyncio.get_running_loop().run_in_executor(queue.executor, engine.load, model_name)
+        logger.info("Loaded model %s on %s", model_name, engine.device)
+    except Exception:
+        logger.exception("Model loading failed")
+    finally:
+        model_load_task = None
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    global model_load_task
     await queue.start()
+    if config["server"].get("auto_load_model", True):
+        default_model = config["tts_engine"]["default_model"]
+        model_load_task = asyncio.create_task(_load_model_in_background(default_model))
     yield
+    if model_load_task and not model_load_task.done():
+        model_load_task.cancel()
     await queue.stop()
 
 
 app = FastAPI(
-    title="Soft Meta Chatterbox TTS Server",
-    version="0.1.0",
+    title=APP_NAME,
+    version=APP_VERSION,
+    description="SoftMeta self-hosted Chatterbox TTS server and studio.",
     lifespan=lifespan,
 )
-
 app.mount("/static", StaticFiles(directory=ROOT / "ui"), name="static")
 app.mount("/outputs", StaticFiles(directory=storage.outputs), name="outputs")
 
 
+@app.exception_handler(Exception)
+async def unexpected_error(_: Request, error: Exception) -> JSONResponse:
+    logger.exception("Unhandled server error")
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": f"{type(error).__name__}: {error}",
+            "message": "The server could not complete this request. Check the Colab log for details.",
+        },
+    )
+
+
 @app.get("/", response_class=HTMLResponse)
 def index() -> HTMLResponse:
-    return HTMLResponse((ROOT / "ui" / "index.html").read_text(encoding="utf-8"))
+    return HTMLResponse(
+        (ROOT / "ui" / "index.html").read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get("/health")
 def health() -> dict[str, Any]:
     return {
         "ok": True,
-        "device": engine.device,
-        "loaded_model": engine.loaded_model,
+        "app": APP_NAME,
+        "version": APP_VERSION,
+        "engine": engine.status(),
         "queue_size": queue.queue.qsize(),
+        "active_jobs": queue.has_active_jobs(),
     }
 
 
 @app.get("/api/ui/initial-data")
 def initial_data() -> dict[str, Any]:
     return {
-        "app": {"name": "Soft Meta Chatterbox TTS Server", "version": "0.1.0"},
-        "models": [
-            {"id": "chatterbox", "name": "Chatterbox Original (English)"},
-            {"id": "chatterbox-turbo", "name": "Chatterbox Turbo (English)"},
-            {"id": "chatterbox-nano", "name": "Chatterbox Nano (English)"},
-            {"id": "chatterbox-multilingual", "name": "Chatterbox Multilingual V3"},
-        ],
+        "app": {"name": APP_NAME, "version": APP_VERSION},
+        "models": MODELS,
         "active_model": engine.loaded_model or config["tts_engine"]["default_model"],
-        "model_loaded": engine.loaded_model is not None,
-        "device": engine.device,
+        "engine": engine.status(),
         "predefined_voices": storage.list_audio(storage.voices),
         "reference_voices": storage.list_audio(storage.references),
         "presets": PRESETS,
         "defaults": config["generation_defaults"],
         "jobs": queue.list_jobs(),
+        "limits": {"max_audio_tabs": 5, "max_voice_upload_mb": 100},
     }
+
+
+@app.get("/api/model-info")
+def model_info() -> dict[str, Any]:
+    return engine.status()
 
 
 @app.post("/api/model/load")
 async def load_model(request: ModelLoadRequest) -> dict[str, Any]:
-    if any(job["status"] == "running" for job in queue.jobs.values()):
-        raise HTTPException(409, "Wait for the current audio generation to finish before changing models.")
-    await asyncio.get_running_loop().run_in_executor(queue.executor, engine.load, request.model)
-    return {"loaded_model": engine.loaded_model, "device": engine.device}
+    global model_load_task
+    if queue.has_active_jobs():
+        raise HTTPException(409, "Wait for queued audio generation to finish before changing models.")
+    if model_load_task and not model_load_task.done():
+        raise HTTPException(409, "A model is already loading.")
+    try:
+        await asyncio.get_running_loop().run_in_executor(queue.executor, engine.load, request.model)
+    except Exception as error:
+        raise HTTPException(500, f"Model loading failed: {type(error).__name__}: {error}") from error
+    return engine.status()
+
+
+@app.post("/api/model/unload")
+async def unload_model() -> dict[str, Any]:
+    if queue.has_active_jobs():
+        raise HTTPException(409, "Wait for queued audio generation to finish before unloading the model.")
+    await asyncio.get_running_loop().run_in_executor(queue.executor, engine.unload)
+    return engine.status()
 
 
 @app.get("/api/voices")
@@ -137,10 +237,13 @@ def voices() -> dict[str, Any]:
 
 
 @app.post("/api/voices/upload")
-async def upload_voice(kind: str = Query(..., pattern="^(predefined|clone)$"), file: UploadFile = File(...)) -> dict[str, Any]:
+async def upload_voice(
+    kind: str = Query(..., pattern="^(predefined|clone)$"),
+    file: UploadFile = File(...),
+) -> dict[str, Any]:
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in AUDIO_EXTENSIONS:
-        raise HTTPException(400, "Unsupported audio format.")
+        raise HTTPException(400, "Unsupported audio format. Use WAV, MP3, FLAC, OGG, M4A or Opus.")
     directory = storage.voices if kind == "predefined" else storage.references
     filename = safe_filename(Path(file.filename or "voice").stem, "voice") + suffix
     destination = directory / filename
@@ -164,7 +267,12 @@ def preview_voice(kind: str, filename: str) -> FileResponse:
         path = storage.voice_path(kind, filename)
     except FileNotFoundError as error:
         raise HTTPException(404, "Voice file not found.") from error
-    return FileResponse(path, media_type=storage.media_type(path), filename=path.name)
+    return FileResponse(
+        path,
+        media_type=storage.media_type(path),
+        filename=path.name,
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get("/api/jobs")
@@ -174,12 +282,18 @@ def list_jobs() -> list[dict[str, Any]]:
 
 @app.post("/api/jobs")
 async def create_job(request: AudioJobCreate) -> dict[str, Any]:
-    return await queue.create(request)
+    try:
+        return await queue.create(request)
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
 
 
 @app.post("/api/jobs/generate-all")
 async def generate_all(request: GenerateAllRequest) -> list[dict[str, Any]]:
-    return await queue.create_many(request.jobs)
+    try:
+        return await queue.create_many(request.jobs)
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
 
 
 @app.get("/api/jobs/{job_id}")
@@ -199,7 +313,7 @@ async def cancel_job(job_id: str) -> dict[str, Any]:
 
 
 @app.get("/api/jobs/{job_id}/audio")
-def job_audio(job_id: str) -> FileResponse:
+def job_audio(job_id: str, download: bool = False) -> FileResponse:
     try:
         job = queue.get(job_id)
     except KeyError as error:
@@ -209,7 +323,12 @@ def job_audio(job_id: str) -> FileResponse:
     path = storage.output_path(job["output_filename"])
     if not path.is_file():
         raise HTTPException(404, "Generated audio file is missing.")
-    return FileResponse(path, media_type="audio/wav", filename=path.name)
+    return FileResponse(
+        path,
+        media_type="audio/wav",
+        filename=path.name if download else None,
+        headers={"Cache-Control": "no-store", "Accept-Ranges": "bytes"},
+    )
 
 
 def _waveform_peaks(path: Path, points: int) -> tuple[list[float], list[float], float]:
@@ -236,7 +355,7 @@ def _waveform_peaks(path: Path, points: int) -> tuple[list[float], list[float], 
 
 
 @app.get("/api/jobs/{job_id}/waveform")
-async def waveform(job_id: str, points: int = Query(4000, ge=500, le=12000)) -> dict[str, Any]:
+async def waveform(job_id: str, points: int = Query(5000, ge=500, le=16000)) -> dict[str, Any]:
     try:
         job = queue.get(job_id)
     except KeyError as error:
@@ -282,8 +401,9 @@ async def cut_audio(job_id: str, request: CutRequest) -> dict[str, Any]:
     source = storage.output_path(job["output_filename"])
     title = safe_filename(job["title"] or f"Audio_{job['audio_number']}")
     prefix = safe_filename(request.filename_prefix, "Selected")
-    filename = f"{prefix}_{title}_{int(time.time())}.wav"
+    filename = f"{prefix}_{title}.wav"
     destination = storage.output_path(filename)
+    destination.unlink(missing_ok=True)
     duration = await asyncio.to_thread(
         _cut_audio,
         source,
@@ -306,6 +426,7 @@ async def tts(request: AudioJobCreate) -> FileResponse:
 
 @app.post("/v1/audio/speech")
 async def openai_speech(request: OpenAITTSRequest) -> FileResponse:
+    valid_models = {model["id"] for model in MODELS}
     voice_mode = "predefined" if request.voice else "default"
     job_request = AudioJobCreate(
         audio_number=1,
@@ -313,9 +434,10 @@ async def openai_speech(request: OpenAITTSRequest) -> FileResponse:
         text=request.input,
         voice_mode=voice_mode,
         voice_filename=request.voice,
-        options={"model": request.model if request.model in {
-            "chatterbox", "chatterbox-turbo", "chatterbox-nano", "chatterbox-multilingual"
-        } else "chatterbox", "speed_factor": request.speed},
+        options={
+            "model": request.model if request.model in valid_models else "chatterbox",
+            "speed_factor": request.speed,
+        },
     )
     return await tts(job_request)
 

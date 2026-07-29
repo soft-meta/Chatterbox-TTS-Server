@@ -1,9 +1,17 @@
 # Third-party notices
 
-Soft Meta Chatterbox TTS Server uses the official Chatterbox model family and Python package from Resemble AI.
+## Chatterbox
 
-- Official upstream: `resemble-ai/chatterbox`
-- Package: `chatterbox-tts==0.1.7`
-- Upstream licence: MIT
+SoftMeta Chatterbox TTS Server uses the official open-source Chatterbox package
+and model technology developed by Resemble AI.
 
-The server, queue, UI, waveform, audio cutter and Colab launcher in this repository are maintained by Soft Meta. Soft Meta does not claim authorship of the original Chatterbox models or model implementation.
+- Upstream: https://github.com/resemble-ai/chatterbox
+- Licence: MIT
+
+The original Chatterbox copyright and licence remain with their respective
+owners. SoftMeta does not claim authorship of the underlying Chatterbox model.
+
+## SoftMeta code
+
+The server, queue, web interface, waveform tools, audio cutter and Colab launcher
+in this repository are maintained by SoftMeta under the repository MIT licence.

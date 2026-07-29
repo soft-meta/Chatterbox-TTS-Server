@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import math
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -16,10 +15,17 @@ from models import AudioJobCreate
 from storage import Storage
 from utils import count_words, estimated_audio_seconds, safe_filename, split_text
 
-TERMINAL_STATES = {"completed", "failed", "cancelled"}
+TERMINAL_STATES = {"completed", "failed", "cancelled", "interrupted"}
+ACTIVE_STATES = {"queued", "running"}
 
 
 class QueueManager:
+    """Single-worker GPU queue for up to five prepared audio jobs.
+
+    The browser may navigate between tabs, minimise the progress dialog or reload;
+    generation remains owned by this server-side worker.
+    """
+
     def __init__(self, engine: EngineService, storage: Storage) -> None:
         self.engine = engine
         self.storage = storage
@@ -28,15 +34,20 @@ class QueueManager:
         self.worker_task: asyncio.Task | None = None
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="softmeta-tts")
         self._waiters: dict[str, asyncio.Event] = {}
+        self._last_persist = 0.0
 
         for job in self.jobs.values():
-            if job.get("status") in {"running", "queued"}:
+            if job.get("status") in ACTIVE_STATES:
                 job["status"] = "interrupted"
-                job["stage"] = "Runtime restarted before completion."
-        self._persist()
+                job["stage"] = "Runtime restarted before this job completed."
+                job["completed_at"] = time.time()
+        self._persist(force=True)
 
-    def _persist(self) -> None:
-        self.storage.save_jobs(self.jobs)
+    def _persist(self, *, force: bool = False) -> None:
+        now = time.monotonic()
+        if force or now - self._last_persist >= 1.5:
+            self.storage.save_jobs(self.jobs)
+            self._last_persist = now
 
     async def start(self) -> None:
         if self.worker_task is None or self.worker_task.done():
@@ -50,18 +61,44 @@ class QueueManager:
             except asyncio.CancelledError:
                 pass
         self.executor.shutdown(wait=False, cancel_futures=True)
+        self._persist(force=True)
+
+    def _queue_positions(self) -> dict[str, int]:
+        queued = [job for job in self.jobs.values() if job.get("status") == "queued"]
+        queued.sort(key=lambda item: item.get("created_at", 0.0))
+        return {job["id"]: index for index, job in enumerate(queued, start=1)}
+
+    def public_job(self, job: dict[str, Any]) -> dict[str, Any]:
+        data = dict(job)
+        data.pop("cancel_requested", None)
+        data["queue_position"] = self._queue_positions().get(job["id"])
+        if data.get("started_at"):
+            end = data.get("completed_at") or time.time()
+            data["elapsed_seconds"] = max(0, round(end - data["started_at"]))
+        else:
+            data["elapsed_seconds"] = 0
+        return data
 
     def list_jobs(self) -> list[dict[str, Any]]:
-        return sorted(self.jobs.values(), key=lambda item: item.get("created_at", 0.0))
+        jobs = sorted(self.jobs.values(), key=lambda item: item.get("created_at", 0.0))
+        return [self.public_job(job) for job in jobs]
 
-    def get(self, job_id: str) -> dict[str, Any]:
+    def get_raw(self, job_id: str) -> dict[str, Any]:
         if job_id not in self.jobs:
             raise KeyError(job_id)
         return self.jobs[job_id]
 
+    def get(self, job_id: str) -> dict[str, Any]:
+        return self.public_job(self.get_raw(job_id))
+
+    def has_active_jobs(self) -> bool:
+        return any(job.get("status") in ACTIVE_STATES for job in self.jobs.values())
+
     async def create(self, request: AudioJobCreate, enqueue: bool = True) -> dict[str, Any]:
-        job_id = uuid.uuid4().hex
         total_words = count_words(request.text)
+        if total_words == 0:
+            raise ValueError("The script is empty.")
+        job_id = uuid.uuid4().hex
         now = time.time()
         job = {
             "id": job_id,
@@ -79,9 +116,8 @@ class QueueManager:
             "percent": 0.0,
             "remaining_percent": 100.0,
             "eta_seconds": None,
-            "estimated_audio_seconds": estimated_audio_seconds(
-                total_words,
-                request.options.speed_factor,
+            "estimated_audio_seconds": round(
+                estimated_audio_seconds(total_words, request.options.speed_factor), 1
             ),
             "actual_audio_seconds": None,
             "output_filename": None,
@@ -93,34 +129,36 @@ class QueueManager:
         }
         self.jobs[job_id] = job
         self._waiters[job_id] = asyncio.Event()
-        self._persist()
+        self._persist(force=True)
         if enqueue:
             await self.queue.put(job_id)
-        return job
+        return self.public_job(job)
 
     async def create_many(self, requests: list[AudioJobCreate]) -> list[dict[str, Any]]:
-        created = []
+        created: list[dict[str, Any]] = []
         for request in requests:
             created.append(await self.create(request, enqueue=True))
         return created
 
     async def cancel(self, job_id: str) -> dict[str, Any]:
-        job = self.get(job_id)
+        job = self.get_raw(job_id)
         if job["status"] in TERMINAL_STATES:
-            return job
+            return self.public_job(job)
         job["cancel_requested"] = True
         if job["status"] == "queued":
             job["status"] = "cancelled"
             job["stage"] = "Cancelled before generation"
             job["completed_at"] = time.time()
             self._signal(job_id)
-        self._persist()
-        return job
+        else:
+            job["stage"] = "Cancellation requested; waiting for the current model pass"
+        self._persist(force=True)
+        return self.public_job(job)
 
     async def wait(self, job_id: str, timeout: float | None = None) -> dict[str, Any]:
-        job = self.get(job_id)
+        job = self.get_raw(job_id)
         if job["status"] in TERMINAL_STATES:
-            return job
+            return self.public_job(job)
         event = self._waiters.setdefault(job_id, asyncio.Event())
         await asyncio.wait_for(event.wait(), timeout=timeout)
         return self.get(job_id)
@@ -145,7 +183,8 @@ class QueueManager:
                     job["stage"] = "Generation failed"
                     job["error"] = f"{type(error).__name__}: {error}"
                     job["completed_at"] = time.time()
-                    self._persist()
+                    job["eta_seconds"] = 0
+                    self._persist(force=True)
                     self._signal(job_id)
             finally:
                 self.queue.task_done()
@@ -154,6 +193,13 @@ class QueueManager:
         if job["voice_mode"] == "default":
             return None
         return self.storage.voice_path(job["voice_mode"], job["voice_filename"])
+
+    @staticmethod
+    def _update_percent(job: dict[str, Any], cap: float = 95.0) -> None:
+        total = max(int(job["total_words"]), 1)
+        percent = min(cap, (float(job["display_words"]) / total) * 95.0)
+        job["percent"] = round(percent, 1)
+        job["remaining_percent"] = round(max(0.0, 100.0 - percent), 1)
 
     async def _smooth_words(
         self,
@@ -168,27 +214,22 @@ class QueueManager:
                 elapsed = time.monotonic() - started
                 fraction = min(0.92, elapsed / max(expected_seconds, 1.0))
                 job["display_words"] = min(
-                    job["total_words"] - 1,
+                    max(job["total_words"] - 1, 0),
                     base_words + int(active_words * fraction),
                 )
                 self._update_percent(job)
+                job["eta_seconds"] = max(1, round(expected_seconds - elapsed))
+                self._persist()
                 await asyncio.sleep(0.5)
         except asyncio.CancelledError:
             pass
-
-    @staticmethod
-    def _update_percent(job: dict[str, Any], cap: float = 95.0) -> None:
-        total = max(int(job["total_words"]), 1)
-        percent = min(cap, (float(job["display_words"]) / total) * 95.0)
-        job["percent"] = round(percent, 1)
-        job["remaining_percent"] = round(max(0.0, 100.0 - percent), 1)
 
     async def _process(self, job: dict[str, Any]) -> None:
         job["status"] = "running"
         job["stage"] = "Preparing text and voice"
         job["started_at"] = time.time()
         job["error"] = None
-        self._persist()
+        self._persist(force=True)
 
         options = job["options"]
         chunks = (
@@ -204,8 +245,7 @@ class QueueManager:
         title = safe_filename(job["title"] or f"Audio_{job['audio_number']}")
         output_filename = f"Audio_{job['audio_number']}_{title}_{job['id'][:8]}.wav"
         output_path = self.storage.output_path(output_filename)
-        if output_path.exists():
-            output_path.unlink()
+        output_path.unlink(missing_ok=True)
 
         completed_words = 0
         started_monotonic = time.monotonic()
@@ -219,13 +259,13 @@ class QueueManager:
                     break
 
                 chunk_words = count_words(chunk)
-                prior_rate = (
+                prior_seconds_per_word = (
                     (time.monotonic() - started_monotonic) / completed_words
                     if completed_words > 0
-                    else 0.35
+                    else 0.36
                 )
-                expected_chunk = max(4.0, prior_rate * max(chunk_words, 1))
-                job["stage"] = f"Generating audio {index} of {len(chunks)}"
+                expected_chunk = max(4.0, prior_seconds_per_word * max(chunk_words, 1))
+                job["stage"] = "Generating speech"
                 ticker = asyncio.create_task(
                     self._smooth_words(job, completed_words, chunk_words, expected_chunk)
                 )
@@ -270,11 +310,12 @@ class QueueManager:
                 remaining_words = max(job["total_words"] - completed_words, 0)
                 job["eta_seconds"] = round(seconds_per_word * remaining_words)
                 self._update_percent(job)
-                self._persist()
+                self._persist(force=True)
 
-            job["stage"] = "Finalising WAV file"
+            job["stage"] = "Finalising audio"
             job["percent"] = 98.0
             job["remaining_percent"] = 2.0
+            self._persist(force=True)
         finally:
             if output_file is not None:
                 output_file.close()
@@ -283,7 +324,7 @@ class QueueManager:
             output_path.unlink(missing_ok=True)
             job["completed_at"] = time.time()
             job["eta_seconds"] = 0
-            self._persist()
+            self._persist(force=True)
             self._signal(job["id"])
             return
 
@@ -298,5 +339,5 @@ class QueueManager:
         job["remaining_percent"] = 0.0
         job["eta_seconds"] = 0
         job["completed_at"] = time.time()
-        self._persist()
+        self._persist(force=True)
         self._signal(job["id"])

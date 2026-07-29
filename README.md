@@ -1,81 +1,104 @@
-# soft-meta/Chatterbox-TTS-Server
+# SoftMeta Chatterbox TTS Server
 
-An independent FastAPI server and browser UI for the official Resemble AI Chatterbox TTS package.
+A professional, self-hosted Chatterbox speech studio maintained by **SoftMeta**.
+The server and browser UI are SoftMeta code. Model inference is provided by the
+official MIT-licensed Chatterbox package from Resemble AI through
+`soft-meta/chatterbox-v2`.
 
-This repository does **not** clone or patch `devnen/Chatterbox-TTS-Server`, and it does not depend on `devnen/chatterbox-v2`.
+## v0.2.0
 
-## Included in v0.1.0
+This release replaces the v0.1 prototype UI and makes the uploaded Azad Colab
+workspace the product reference for layout and behaviour.
 
+### Studio interface
+
+- Professional light and dark interface
 - Chatterbox Original English as the default model
 - Motivational Speech as the default preset
-- Up to five Audio tabs
-- Video Title field inside each Audio tab
-- Generate Audio and Generate All
-- Sequential server-side GPU queue
-- Queue Monitor with selectable title, live percentage, remaining percentage, words, ETA and audio-length estimate
-- Minimisable progress monitor and bottom-right live status
-- Predefined voice and uploaded clone voice preview
-- Generated audio preview and WAV download
-- Normal player fallback when waveform loading fails
-- Server-generated lightweight waveform peaks
-- Waveform zoom, horizontal scrolling, hover time and click-to-set Start/End
-- Quick End buttons: 2, 2:30, 3, 3:30, 4, 4:30 and 5 minutes
-- Preview Selected, Download Selected WAV, Part One and Part Two downloads
-- Original generated audio is never modified
-- OpenAI-style `/v1/audio/speech` compatibility endpoint
-- Google Colab launcher
+- Audio 1 and Audio 2 workspaces by default
+- Add tabs up to Audio 5
+- Video Title stays inside each Audio workspace
+- Generate Audio buttons and Generate All
+- No Server Configuration block in the UI
 
-## Repository pair
+### Voice tools
 
-1. `soft-meta/chatterbox-v2` — runtime adapter around the official Resemble AI package
-2. `soft-meta/Chatterbox-TTS-Server` — server, queue, UI and tools
+- Model default voice
+- Predefined voice files
+- Uploaded reference voice cloning
+- Voice upload, refresh and preview
+- Per-tab voice and generation settings
+
+### Queue and progress
+
+- Server-side sequential GPU queue
+- A tab can be edited while another audio is generating
+- Queue Monitor with selectable video titles
+- Live generated and remaining percentages
+- Live word progress, elapsed time and ETA
+- Estimated final audio duration
+- Completed-audio preview and download
+- Minimise the monitor to a bottom-right progress widget
+
+### Generated audio
+
+- Native browser player is always available
+- Waveform is loaded from server-generated peaks, avoiding full-WAV browser decoding
+- Graceful waveform failure with Download WAV preserved
+- Mouse time and click-to-set Start or End
+- Zoom, fit, horizontal wheel scrolling and drag-to-pan
+- Start and End selection
+- Quick first 2, 2:30, 3, 3:30, 4, 4:30 and 5 minute selections
+- Preview Selected and Download Selected WAV
+- Part One and Part Two downloads
+- `Part_One_Video_Title.wav` and `Part_Two_Video_Title.wav` filenames
+- Original generated WAV is never changed by cutting
+
+## Repository relationship
+
+```text
+soft-meta/chatterbox-v2
+        ↓
+soft-meta/Chatterbox-TTS-Server
+        ↓
+Google Colab L4 or local/Docker runtime
+```
+
+This repository has no runtime dependency on `devnen/Chatterbox-TTS-Server` or
+`devnen/chatterbox-v2`.
+
+## Google Colab
+
+Open `colab/SoftMeta_Chatterbox_TTS_Colab_v0.2.0.ipynb`, select an L4 GPU and
+run every cell from top to bottom. The notebook clones the `v0.2.0` releases of
+both SoftMeta repositories.
 
 ## Local installation
 
-```bash
-git clone https://github.com/soft-meta/chatterbox-v2.git
-cd chatterbox-v2
-pip install -e .
+Python 3.11 and a compatible PyTorch installation are recommended.
 
-cd ..
-git clone https://github.com/soft-meta/Chatterbox-TTS-Server.git
+```bash
+git clone --branch v0.2.0 https://github.com/soft-meta/chatterbox-v2.git
+git clone --branch v0.2.0 https://github.com/soft-meta/Chatterbox-TTS-Server.git
+
+python -m pip install chatterbox-tts==0.1.7
+python -m pip install --no-deps -e ./chatterbox-v2
+python -m pip install -r ./Chatterbox-TTS-Server/requirements-colab.txt
+
 cd Chatterbox-TTS-Server
-pip install -r requirements-colab.txt
 python start.py
 ```
 
-Open `http://localhost:8004`.
+Open `http://127.0.0.1:8004`.
 
-## GitHub upload order
+## Reference voice guidance
 
-Upload and release the engine first, because the server's `requirements.txt` points to `soft-meta/chatterbox-v2@v0.1.0`.
-
-```bash
-# In chatterbox-v2
-git init
-git add .
-git commit -m "Initial Soft Meta engine adapter"
-git branch -M main
-git remote add origin https://github.com/soft-meta/chatterbox-v2.git
-git push -u origin main
-git tag -a v0.1.0 -m "First stable engine adapter"
-git push origin v0.1.0
-
-# In Chatterbox-TTS-Server
-git init
-git add .
-git commit -m "Initial independent Soft Meta TTS server"
-git branch -M main
-git remote add origin https://github.com/soft-meta/Chatterbox-TTS-Server.git
-git push -u origin main
-git tag -a v0.1.0 -m "First server release"
-git push origin v0.1.0
-```
-
-## Voice cloning
-
-Only clone a voice you own or have permission to use. A clear 10–20 second reference clip with one speaker, no music and low background noise is recommended.
+For natural cloning, use a clean 10–20 second recording from one speaker with
+no music, echo or strong background noise. A preset cannot reliably replace the
+accent in a reference voice. Only clone voices you own or have permission to use.
 
 ## Licence
 
-Soft Meta application code is MIT licensed. Chatterbox remains an MIT-licensed third-party technology by Resemble AI; retain all upstream notices.
+SoftMeta server and UI code are MIT licensed. Chatterbox software and model
+technology remain the work of Resemble AI and retain their own copyright and
+licence notices. See `THIRD_PARTY_NOTICES.md`.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -10,7 +11,11 @@ ROOT = Path(__file__).resolve().parent
 CONFIG_PATH = ROOT / "config.yaml"
 
 DEFAULT_CONFIG: dict[str, Any] = {
-    "server": {"host": "0.0.0.0", "port": 8004},
+    "server": {
+        "host": "0.0.0.0",
+        "port": 8004,
+        "auto_load_model": True,
+    },
     "tts_engine": {
         "device": "auto",
         "default_model": "chatterbox",
@@ -36,6 +41,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "seed": 2025,
         "split_text": True,
         "chunk_words": 90,
+        "output_format": "wav",
     },
 }
 
@@ -53,9 +59,21 @@ def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]
 def load_config() -> dict[str, Any]:
     if not CONFIG_PATH.exists():
         save_config(DEFAULT_CONFIG)
-        return deepcopy(DEFAULT_CONFIG)
-    loaded = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}
-    return deep_merge(DEFAULT_CONFIG, loaded)
+        config = deepcopy(DEFAULT_CONFIG)
+    else:
+        loaded = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}
+        config = deep_merge(DEFAULT_CONFIG, loaded)
+
+    # Environment overrides make Colab and Docker deployment predictable.
+    if os.getenv("SOFTMETA_HOST"):
+        config["server"]["host"] = os.environ["SOFTMETA_HOST"]
+    if os.getenv("SOFTMETA_PORT"):
+        config["server"]["port"] = int(os.environ["SOFTMETA_PORT"])
+    if os.getenv("SOFTMETA_DEVICE"):
+        config["tts_engine"]["device"] = os.environ["SOFTMETA_DEVICE"]
+    if os.getenv("SOFTMETA_MODEL"):
+        config["tts_engine"]["default_model"] = os.environ["SOFTMETA_MODEL"]
+    return config
 
 
 def save_config(config: dict[str, Any]) -> None:

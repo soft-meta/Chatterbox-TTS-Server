@@ -1,26 +1,26 @@
-# GitHub upload guide
+# GitHub update guide for v0.2.0
 
-## 1. Create two empty repositories
+The `soft-meta/chatterbox-v2` and `soft-meta/Chatterbox-TTS-Server`
+repositories already exist. Do not delete the old `v0.1.0` releases.
 
-Under the `soft-meta` GitHub organisation create:
+## Engine repository
 
-- `chatterbox-v2`
-- `Chatterbox-TTS-Server`
+1. Open `soft-meta/chatterbox-v2`.
+2. Upload the contents of the v0.2.0 engine folder to the repository root.
+3. Replace matching files.
+4. Commit as `SoftMeta chatterbox-v2 v0.2.0`.
+5. Create a normal release using tag `v0.2.0` from `main`.
 
-Do not initialise them with another README or licence because the folders already contain those files.
+## Server repository
 
-## 2. Upload `chatterbox-v2` first
+1. Open `soft-meta/Chatterbox-TTS-Server`.
+2. Upload the contents of the v0.2.0 server folder to the repository root.
+3. Replace matching files.
+4. Commit as `SoftMeta Chatterbox TTS Server v0.2.0`.
+5. Create a normal release using tag `v0.2.0` from `main`.
 
-Run the engine commands from the root README, create the `v0.1.0` tag, and verify the repository opens correctly.
+## Colab
 
-## 3. Upload the server
-
-Push `Chatterbox-TTS-Server`, then create its `v0.1.0` tag.
-
-## 4. Test in Colab
-
-Open `colab/Soft_Meta_Chatterbox_TTS_Colab.ipynb`. The notebook uses the two GitHub repositories and does not clone Devnen.
-
-## 5. Release policy
-
-Keep Colab pinned to release tags. Test changes on a `development` branch, then publish `v0.1.1`, `v0.2.0`, and so on. Avoid installing directly from a changing `main` branch for production use.
+After both tags exist, upload
+`colab/SoftMeta_Chatterbox_TTS_Colab_v0.2.0.ipynb` to Google Colab,
+select an L4 GPU and run every cell.

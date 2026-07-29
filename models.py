@@ -4,14 +4,16 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+ModelId = Literal[
+    "chatterbox",
+    "chatterbox-turbo",
+    "chatterbox-nano",
+    "chatterbox-multilingual",
+]
+
 
 class GenerationOptions(BaseModel):
-    model: Literal[
-        "chatterbox",
-        "chatterbox-turbo",
-        "chatterbox-nano",
-        "chatterbox-multilingual",
-    ] = "chatterbox"
+    model: ModelId = "chatterbox"
     language: str = "en"
     temperature: float = Field(0.8, ge=0.05, le=2.0)
     exaggeration: float = Field(0.65, ge=0.0, le=2.0)
@@ -24,6 +26,7 @@ class GenerationOptions(BaseModel):
     seed: int = Field(2025, ge=0, le=2_147_483_647)
     split_text: bool = True
     chunk_words: int = Field(90, ge=25, le=250)
+    output_format: Literal["wav"] = "wav"
 
 
 class AudioJobCreate(BaseModel):
@@ -37,7 +40,7 @@ class AudioJobCreate(BaseModel):
     @model_validator(mode="after")
     def validate_voice(self) -> "AudioJobCreate":
         if self.voice_mode in {"predefined", "clone"} and not self.voice_filename:
-            raise ValueError("A voice file is required for the selected voice mode.")
+            raise ValueError("Select or upload a voice for the selected voice mode.")
         return self
 
 
@@ -48,16 +51,11 @@ class GenerateAllRequest(BaseModel):
 class CutRequest(BaseModel):
     start_seconds: float = Field(0.0, ge=0.0)
     end_seconds: float | None = Field(None, gt=0.0)
-    filename_prefix: str = "Selected"
+    filename_prefix: str = Field("Selected", max_length=80)
 
 
 class ModelLoadRequest(BaseModel):
-    model: Literal[
-        "chatterbox",
-        "chatterbox-turbo",
-        "chatterbox-nano",
-        "chatterbox-multilingual",
-    ]
+    model: ModelId
 
 
 class OpenAITTSRequest(BaseModel):

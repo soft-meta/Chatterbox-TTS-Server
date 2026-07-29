@@ -1,15 +1,19 @@
 server:
   host: 0.0.0.0
   port: 8004
+  auto_load_model: true
+
 tts_engine:
   device: auto
   default_model: chatterbox
   predefined_voices_path: voices
   reference_audio_path: reference_audio
+
 storage:
   outputs_path: outputs
   data_path: data
   logs_path: logs
+
 generation_defaults:
   preset: Motivational Speech
   language: en
@@ -24,3 +28,4 @@ generation_defaults:
   seed: 2025
   split_text: true
   chunk_words: 90
+  output_format: wav

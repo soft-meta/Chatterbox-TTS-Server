@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-_SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+")
+_SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])(?:[\"'”’)]*)\s+")
 _WORD = re.compile(r"\b[\w’'-]+\b", flags=re.UNICODE)
 
 
@@ -12,34 +12,40 @@ def count_words(text: str) -> int:
 
 
 def split_text(text: str, max_words: int = 90) -> list[str]:
-    cleaned = re.sub(r"\s+", " ", text).strip()
+    """Sentence-aware long-text splitter with safe fallback for long sentences."""
+    cleaned = re.sub(r"[ \t]+", " ", text.replace("\r\n", "\n").replace("\r", "\n"))
+    cleaned = re.sub(r"\n{2,}", "\n", cleaned).strip()
     if not cleaned:
         return []
-    sentences = [part.strip() for part in _SENTENCE_BOUNDARY.split(cleaned) if part.strip()]
+
+    sentences: list[str] = []
+    for paragraph in cleaned.split("\n"):
+        sentences.extend(part.strip() for part in _SENTENCE_BOUNDARY.split(paragraph) if part.strip())
+
     chunks: list[str] = []
     current: list[str] = []
     current_words = 0
 
+    def flush() -> None:
+        nonlocal current, current_words
+        if current:
+            chunks.append(" ".join(current).strip())
+            current = []
+            current_words = 0
+
     for sentence in sentences:
         words = sentence.split()
         if len(words) > max_words:
-            if current:
-                chunks.append(" ".join(current))
-                current = []
-                current_words = 0
+            flush()
             for index in range(0, len(words), max_words):
                 chunks.append(" ".join(words[index:index + max_words]))
             continue
         if current and current_words + len(words) > max_words:
-            chunks.append(" ".join(current))
-            current = []
-            current_words = 0
+            flush()
         current.append(sentence)
         current_words += len(words)
-
-    if current:
-        chunks.append(" ".join(current))
-    return chunks
+    flush()
+    return [chunk for chunk in chunks if chunk]
 
 
 def safe_filename(value: str, fallback: str = "Untitled_Audio") -> str:
