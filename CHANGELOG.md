@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.2.1
+
+- Pin `setuptools<81` for compatibility with the current official PerTh package.
+- Verify that `PerthImplicitWatermarker` is callable before launching the server.
+- Preserve the safe Colab launcher that does not stop the server during Run all.
+- Show the real startup error inside Colab before opening the proxy URL.
+
+
 ## 0.2.0
 
 - Rebuilt the browser studio to match the Azad multi-audio workflow

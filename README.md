@@ -102,3 +102,8 @@ accent in a reference voice. Only clone voices you own or have permission to use
 SoftMeta server and UI code are MIT licensed. Chatterbox software and model
 technology remain the work of Resemble AI and retain their own copyright and
 licence notices. See `THIRD_PARTY_NOTICES.md`.
+
+
+## v0.2.1 Colab compatibility
+
+The Colab launcher pins `setuptools==80.9.0` because the current official PerTh package still imports `pkg_resources`. This preserves the official neural watermarker and prevents the model-loading error `TypeError: 'NoneType' object is not callable`.
