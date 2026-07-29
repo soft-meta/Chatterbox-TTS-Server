@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.3.1
+
+- Fixed Generate Voice import failures caused by incompatible Transformers requirements
+- Added an isolated Parler-TTS virtual environment that shares the main CUDA PyTorch installation
+- Added a dedicated voice worker process with detailed diagnostics and timeout handling
+- Kept Chatterbox and Parler-TTS dependencies separated without duplicating the GPU job queue
+- Updated Colab and Docker installation flows
+
 ## v0.3.0
 
 - Replaced the duplicate visible browser audio player with a hidden audio engine

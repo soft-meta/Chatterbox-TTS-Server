@@ -5,7 +5,7 @@ server, queue, browser interface, waveform tools and audio editor are SoftMeta
 code. Chatterbox model inference is provided by the official MIT-licensed
 Chatterbox package from Resemble AI through `soft-meta/chatterbox-v2`.
 
-## v0.3.0 highlights
+## v0.3.1 highlights
 
 ### Professional multi-audio studio
 
@@ -70,7 +70,7 @@ voice descriptions that respect consent and applicable law.
 ```text
 soft-meta/chatterbox-v2@v0.2.1
         ↓
-soft-meta/Chatterbox-TTS-Server@v0.3.0
+soft-meta/Chatterbox-TTS-Server@v0.3.1
         ↓
 Google Colab L4, local Python or Docker
 ```
@@ -80,9 +80,9 @@ This repository has no runtime dependency on `devnen/Chatterbox-TTS-Server` or
 
 ## Google Colab
 
-Open `colab/SoftMeta_Chatterbox_TTS_Colab_v0.3.0.ipynb`, select an L4 GPU and
+Open `colab/SoftMeta_Chatterbox_TTS_Colab_v0.3.1.ipynb`, select an L4 GPU and
 run every cell from top to bottom. The notebook uses the stable SoftMeta engine
-`v0.2.1` and server/UI `v0.3.0` releases.
+`v0.2.1` and server/UI `v0.3.1` release.
 
 The optional Generate Voice feature downloads a separate Parler-TTS model the
 first time it is used. To reduce GPU pressure, SoftMeta unloads Chatterbox,
@@ -95,7 +95,7 @@ Python 3.11 and a compatible PyTorch installation are recommended.
 
 ```bash
 git clone --branch v0.2.1 https://github.com/soft-meta/chatterbox-v2.git
-git clone --branch v0.3.0 https://github.com/soft-meta/Chatterbox-TTS-Server.git
+git clone --branch v0.3.1 https://github.com/soft-meta/Chatterbox-TTS-Server.git
 
 python -m pip install chatterbox-tts==0.1.7
 python -m pip install --no-deps -e ./chatterbox-v2
@@ -121,3 +121,8 @@ cannot reliably replace the reference speaker’s accent.
 SoftMeta server and UI code are MIT licensed. Chatterbox software and model
 technology remain the work of Resemble AI. The optional Generate Voice feature
 uses Parler-TTS under Apache-2.0. See `THIRD_PARTY_NOTICES.md`.
+
+
+### Generate Voice dependency isolation
+
+Generate Voice runs Parler-TTS in a separate Python virtual environment because Parler-TTS 0.2.3 and Chatterbox 0.1.7 require incompatible Transformers versions. The Colab notebook creates this environment automatically.

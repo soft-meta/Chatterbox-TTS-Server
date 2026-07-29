@@ -1,30 +1,45 @@
 from __future__ import annotations
 
-import gc
-import random
+import json
+import os
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
 from threading import RLock
-
-import numpy as np
-import soundfile as sf
-import torch
 
 from utils import safe_filename
 
 
 class VoiceDesigner:
-    """Lazy text-described voice sample generator using Parler-TTS Mini v1.1.
+    """Generate a short text-described reference voice in an isolated process.
 
-    The generated WAV is a reference sample. SoftMeta then uses that sample through
-    Chatterbox zero-shot voice cloning for long-form audio generation.
+    Chatterbox 0.1.7 and Parler-TTS 0.2.3 require incompatible Transformers
+    versions. Running Parler-TTS in a separate Python environment prevents one
+    engine from replacing the dependencies of the other.
     """
 
     MODEL_ID = "parler-tts/parler-tts-mini-v1.1"
 
-    def __init__(self, output_dir: Path, device: str = "cuda") -> None:
+    def __init__(
+        self,
+        output_dir: Path,
+        device: str = "cuda",
+        *,
+        python_executable: str | None = None,
+        worker_path: Path | None = None,
+        timeout_seconds: int = 1800,
+    ) -> None:
         self.output_dir = output_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.device = "cuda" if device == "cuda" and torch.cuda.is_available() else "cpu"
+        self.device = device
+        self.python_executable = (
+            python_executable
+            or os.getenv("SOFTMETA_VOICE_PYTHON")
+            or sys.executable
+        )
+        self.worker_path = worker_path or Path(__file__).with_name("voice_worker.py")
+        self.timeout_seconds = timeout_seconds
         self._lock = RLock()
 
     @staticmethod
@@ -36,62 +51,96 @@ class VoiceDesigner:
         )
         return text if "very clear" in text.lower() else text + quality
 
+    def _next_output_path(self, name: str, seed: int) -> Path:
+        stem = safe_filename(name, "Generated_Voice")
+        candidate = self.output_dir / f"{stem}_{seed}.wav"
+        counter = 2
+        while candidate.exists():
+            candidate = self.output_dir / f"{stem}_{seed}_{counter}.wav"
+            counter += 1
+        return candidate
+
+    def _validate_runner(self) -> None:
+        python_path = Path(self.python_executable)
+        if not python_path.exists():
+            raise RuntimeError(
+                "The isolated Generate Voice environment is missing. "
+                "Run the SoftMeta Colab installation cell again from a fresh runtime. "
+                f"Expected Python executable: {python_path}"
+            )
+        if not self.worker_path.exists():
+            raise RuntimeError(f"Generate Voice worker was not found: {self.worker_path}")
+
     def generate(self, *, name: str, description: str, sample_text: str, seed: int) -> Path:
         with self._lock:
-            try:
-                from parler_tts import ParlerTTSForConditionalGeneration
-                from transformers import AutoTokenizer
-            except ImportError as error:
-                raise RuntimeError(
-                    "Generate Voice requires parler-tts==0.2.3. Install the SoftMeta Colab requirements."
-                ) from error
+            self._validate_runner()
+            output_path = self._next_output_path(name, seed)
+            request = {
+                "model_id": self.MODEL_ID,
+                "description": self._complete_description(description),
+                "sample_text": sample_text.strip(),
+                "seed": int(seed),
+                "device": self.device,
+                "output_path": str(output_path),
+            }
 
-            torch.manual_seed(seed)
-            random.seed(seed)
-            np.random.seed(seed % (2**32 - 1))
-            if torch.cuda.is_available():
-                torch.cuda.manual_seed_all(seed)
-
-            dtype = torch.float16 if self.device == "cuda" else torch.float32
-            model = None
+            request_path: Path | None = None
             try:
-                model = ParlerTTSForConditionalGeneration.from_pretrained(
-                    self.MODEL_ID,
-                    torch_dtype=dtype,
-                ).to(self.device)
-                prompt_tokenizer = AutoTokenizer.from_pretrained(self.MODEL_ID)
-                description_tokenizer = AutoTokenizer.from_pretrained(
-                    model.config.text_encoder._name_or_path
+                with tempfile.NamedTemporaryFile(
+                    mode="w",
+                    suffix=".json",
+                    prefix="softmeta_voice_",
+                    delete=False,
+                    encoding="utf-8",
+                ) as handle:
+                    json.dump(request, handle, ensure_ascii=False)
+                    request_path = Path(handle.name)
+
+                env = {
+                    **os.environ,
+                    "PYTHONUNBUFFERED": "1",
+                    "TOKENIZERS_PARALLELISM": "false",
+                    "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
+                }
+                result = subprocess.run(
+                    [
+                        self.python_executable,
+                        "-u",
+                        str(self.worker_path),
+                        "--request",
+                        str(request_path),
+                    ],
+                    cwd=str(self.worker_path.parent),
+                    env=env,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    timeout=self.timeout_seconds,
+                    check=False,
                 )
 
-                description_ids = description_tokenizer(
-                    self._complete_description(description),
-                    return_tensors="pt",
-                ).input_ids.to(self.device)
-                prompt_ids = prompt_tokenizer(
-                    sample_text.strip(),
-                    return_tensors="pt",
-                ).input_ids.to(self.device)
-
-                with torch.inference_mode():
-                    generation = model.generate(
-                        input_ids=description_ids,
-                        prompt_input_ids=prompt_ids,
-                        do_sample=True,
+                if result.returncode != 0:
+                    output_path.unlink(missing_ok=True)
+                    details = (result.stdout or "No worker output.")[-8000:]
+                    raise RuntimeError(
+                        "The isolated Generate Voice worker failed.\n"
+                        f"Python: {self.python_executable}\n"
+                        f"Exit code: {result.returncode}\n"
+                        f"Worker output:\n{details}"
                     )
-
-                audio = generation.detach().float().cpu().numpy().squeeze()
-                if audio.ndim != 1 or audio.size < 1000:
-                    raise RuntimeError("The voice designer returned an invalid audio sample.")
-
-                stem = safe_filename(name, "Generated_Voice")
-                filename = f"{stem}_{seed}.wav"
-                path = self.output_dir / filename
-                sf.write(path, audio, int(model.config.sampling_rate), subtype="PCM_16")
-                return path
+                if not output_path.exists() or output_path.stat().st_size < 1000:
+                    output_path.unlink(missing_ok=True)
+                    details = (result.stdout or "No worker output.")[-4000:]
+                    raise RuntimeError(
+                        "Generate Voice finished without creating a valid WAV file.\n"
+                        f"Worker output:\n{details}"
+                    )
+                return output_path
+            except subprocess.TimeoutExpired as error:
+                output_path.unlink(missing_ok=True)
+                raise RuntimeError(
+                    f"Generate Voice exceeded the {self.timeout_seconds // 60}-minute timeout."
+                ) from error
             finally:
-                del model
-                gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-                    torch.cuda.ipc_collect()
+                if request_path is not None:
+                    request_path.unlink(missing_ok=True)
