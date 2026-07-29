@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.5.1
+
+- Fixed an unterminated Python string in the Qwen3-TTS Colab environment verification cell.
+- Added a clean verification heading using two valid `print()` calls.
+- Updated Colab release references and cache-busting UI version strings.
+- No changes to voice design, queue processing, or Chatterbox generation.
+
 ## v0.5.0
 
 - Replaced Parler-TTS Generate Voice with official Qwen3-TTS VoiceDesign
