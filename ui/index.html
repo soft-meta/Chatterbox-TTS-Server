@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f7f9fc">
   <title>SoftMeta Chatterbox TTS Server</title>
-  <link rel="stylesheet" href="/static/styles.css?v=0.2.0">
+  <link rel="stylesheet" href="/static/styles.css?v=0.3.0">
 </head>
 <body>
   <header class="app-header">
@@ -34,6 +34,7 @@
         </div>
         <div class="studio-actions">
           <button id="generate-all" class="button button-primary" type="button">Generate All</button>
+          <button id="remove-all" class="button button-danger-soft" type="button" title="Clear completed jobs, titles, scripts and generated audio">Remove All</button>
           <button id="open-monitor" class="button button-secondary" type="button">Audio Queue Monitor</button>
         </div>
       </div>
@@ -64,7 +65,7 @@
   </main>
 
   <footer class="app-footer">
-    <span>SoftMeta Chatterbox TTS Server v0.2.0</span>
+    <span><a href="https://github.com/soft-meta/chatterbox-v2" target="_blank" rel="noopener">SoftMeta Chatterbox TTS</a> Server v0.3.0</span>
     <span>Powered by the official open-source Chatterbox engine</span>
   </footer>
 
@@ -131,24 +132,65 @@
       <div class="voice-mode-tabs" role="tablist" aria-label="Voice mode">
         <button data-voice-mode="predefined" type="button">Predefined Voices</button>
         <button data-voice-mode="clone" type="button">Voice Cloning (Reference)</button>
-        <button data-voice-mode="default" type="button">Model Default</button>
+        <button data-voice-mode="generated" type="button">Generate Voice</button>
       </div>
 
       <section class="voice-section">
-        <div class="voice-grid">
-          <div class="field grow">
-            <label data-role="voice-label">Select Voice</label>
-            <select data-field="voice_filename"></select>
+        <div data-role="standard-voice-tools">
+          <div class="voice-grid">
+            <div class="field grow">
+              <label data-role="voice-label">Select Voice</label>
+              <select data-field="voice_filename"></select>
+            </div>
+            <label data-role="voice-upload-button" class="button button-secondary upload-control">
+              <input data-role="voice-upload" type="file" accept="audio/*" hidden>
+              Import
+            </label>
+            <button data-action="refresh-voices" class="button button-secondary" type="button">Refresh</button>
+            <button data-action="preview-voice" class="button button-secondary" type="button">Preview Voice</button>
           </div>
-          <label data-role="voice-upload-button" class="button button-secondary upload-control">
-            <input data-role="voice-upload" type="file" accept="audio/*" hidden>
-            Import
-          </label>
-          <button data-action="refresh-voices" class="button button-secondary" type="button">Refresh</button>
-          <button data-action="preview-voice" class="button button-secondary" type="button">Preview Voice</button>
+          <audio data-role="voice-player" class="voice-player hidden" controls preload="metadata"></audio>
+          <p class="voice-help">Use only voices you own or have permission to clone. Clean speech with no music or echo produces the best result.</p>
         </div>
-        <audio data-role="voice-player" class="voice-player hidden" controls preload="metadata"></audio>
-        <p class="voice-help">Use only voices you own or have permission to clone. Clean speech with no music or echo produces the best result.</p>
+
+        <div data-role="voice-designer" class="voice-designer hidden">
+          <div class="voice-designer-intro">
+            <h3>Generate a New Voice Reference</h3>
+            <p>Describe the speaker and provide a short sample line. SoftMeta generates a reference WAV, then Chatterbox can clone it for your long-form audio.</p>
+          </div>
+          <div class="voice-designer-grid">
+            <label class="field">
+              <span>Voice Name</span>
+              <input data-field="generated_voice_name" type="text" maxlength="80" placeholder="American Male 50 Warm">
+            </label>
+            <label class="field">
+              <span>Generation Seed</span>
+              <input data-field="generated_voice_seed" type="number" min="0" max="2147483647" value="2025">
+            </label>
+          </div>
+          <label class="field voice-description-field">
+            <span>Voice Description</span>
+            <textarea data-field="generated_voice_description" rows="4" placeholder="A 50-year-old American man with a warm, confident, natural voice, medium-low pitch, relaxed pace, subtle emotion, and clear American pronunciation."></textarea>
+          </label>
+          <label class="field voice-sample-field">
+            <span>Voiceover Sample Text</span>
+            <textarea data-field="generated_voice_text" rows="3" placeholder="Today, I want to share a simple lesson that can make life feel calmer and more meaningful."></textarea>
+          </label>
+          <div class="generated-voice-library">
+            <label class="field grow">
+              <span>Saved Generated Voices</span>
+              <select data-field="generated_voice_filename"></select>
+            </label>
+            <button data-action="preview-generated-voice" class="button button-secondary" type="button">Preview</button>
+            <a data-role="download-generated-voice" class="button button-secondary disabled" href="#" download>Download</a>
+          </div>
+          <div class="voice-designer-actions">
+            <button data-action="generate-voice" class="button button-primary" type="button">Generate Voice</button>
+            <span data-role="voice-designer-status" class="voice-designer-status">The first use downloads the Parler-TTS voice-design model.</span>
+          </div>
+          <audio data-role="generated-voice-player" class="voice-player hidden" controls preload="metadata"></audio>
+          <p class="voice-help">Text-described voices are approximate. Age, accent and identity can vary. Generate several seeds and keep the sample you prefer.</p>
+        </div>
       </section>
 
       <section class="preset-section">
@@ -233,24 +275,17 @@
           <span>Selected time <strong data-role="selected-time">0:00.0</strong></span>
         </div>
 
-        <div class="player-row">
-          <audio data-role="main-player" controls preload="metadata"></audio>
+        <audio data-role="main-player" class="hidden-audio-engine" preload="metadata"></audio>
+        <div class="wave-player-controls">
+          <button data-action="toggle-playback" class="button button-primary playback-button" type="button">Play</button>
+          <span data-role="playback-time" class="playback-time">0:00 / 0:00</span>
+          <input data-role="playback-progress" class="playback-progress" type="range" min="0" max="1000" value="0" aria-label="Audio playback position">
         </div>
         <div data-role="generation-meta" class="generation-meta"></div>
 
         <div class="cutter-panel">
           <h3>Cut Generated Audio</h3>
           <p>Choose any start and end time. Your original generated audio remains unchanged.</p>
-          <div class="quick-cuts">
-            <span>Keep first:</span>
-            <button data-quick="120" type="button">2 min</button>
-            <button data-quick="150" type="button">2:30</button>
-            <button data-quick="180" type="button">3 min</button>
-            <button data-quick="210" type="button">3:30</button>
-            <button data-quick="240" type="button">4 min</button>
-            <button data-quick="270" type="button">4:30</button>
-            <button data-quick="300" type="button">5 min</button>
-          </div>
           <div class="cut-time-grid">
             <label class="field"><span>Start time</span><input data-field="cut_start" type="text" value="0:00" placeholder="0:00"></label>
             <label class="field"><span>End time</span><input data-field="cut_end" type="text" value="" placeholder="5:00"></label>
@@ -277,6 +312,6 @@
     </article>
   </template>
 
-  <script src="/static/app.js?v=0.2.0" defer></script>
+  <script src="/static/app.js?v=0.3.0" defer></script>
 </body>
 </html>

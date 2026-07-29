@@ -155,6 +155,30 @@ class QueueManager:
         self._persist(force=True)
         return self.public_job(job)
 
+    async def delete(self, job_id: str, *, delete_file: bool = True) -> None:
+        job = self.get_raw(job_id)
+        if job.get("status") in ACTIVE_STATES:
+            raise RuntimeError("Active jobs cannot be removed. Wait for generation or cancel the job first.")
+        filename = job.get("output_filename")
+        if delete_file and filename:
+            self.storage.delete_output_artifacts(filename)
+        self.jobs.pop(job_id, None)
+        self._waiters.pop(job_id, None)
+        self._persist(force=True)
+
+    async def clear(self, *, delete_files: bool = True) -> None:
+        if self.has_active_jobs():
+            raise RuntimeError("Wait for all queued audio jobs to finish before using Remove All.")
+        if delete_files:
+            for job in self.jobs.values():
+                filename = job.get("output_filename")
+                if filename:
+                    self.storage.delete_output_artifacts(filename)
+            self.storage.clear_outputs()
+        self.jobs.clear()
+        self._waiters.clear()
+        self._persist(force=True)
+
     async def wait(self, job_id: str, timeout: float | None = None) -> dict[str, Any]:
         job = self.get_raw(job_id)
         if job["status"] in TERMINAL_STATES:

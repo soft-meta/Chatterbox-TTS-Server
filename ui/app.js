@@ -2,7 +2,7 @@
   'use strict';
 
   const MAX_TABS = 5;
-  const STORAGE_KEY = 'softMetaChatterboxTabsV2';
+  const STORAGE_KEY = 'softMetaChatterboxTabsV3';
   const THEME_KEY = 'softMetaChatterboxTheme';
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
@@ -33,6 +33,11 @@
       language: defaults.language || 'en',
       voice_mode: 'clone',
       voice_filename: '',
+      generated_voice_name: '',
+      generated_voice_description: 'A 50-year-old American man with a warm, confident, natural voice, medium-low pitch, relaxed pace, subtle emotion, and clear American pronunciation.',
+      generated_voice_text: 'Today, I want to share a simple lesson that can make life feel calmer and more meaningful.',
+      generated_voice_seed: 2025,
+      generated_voice_filename: '',
       temperature: defaults.temperature ?? 0.8,
       exaggeration: defaults.exaggeration ?? 0.65,
       cfg_weight: defaults.cfg_weight ?? 0.35,
@@ -165,6 +170,9 @@
     panels.innerHTML = '';
 
     state.tabs.forEach(tab => {
+      const wrap = document.createElement('span');
+      wrap.className = 'audio-tab-wrap';
+
       const button = document.createElement('button');
       button.className = 'audio-tab';
       button.type = 'button';
@@ -176,7 +184,22 @@
         renderActive();
         saveTabs();
       });
-      bar.append(button);
+      wrap.append(button);
+
+      if (tab.number > 2) {
+        const remove = document.createElement('button');
+        remove.className = 'remove-tab';
+        remove.type = 'button';
+        remove.textContent = '−';
+        remove.title = `Remove Audio ${tab.number}`;
+        remove.setAttribute('aria-label', `Remove Audio ${tab.number}`);
+        remove.addEventListener('click', event => {
+          event.stopPropagation();
+          removeTab(tab);
+        });
+        wrap.append(remove);
+      }
+      bar.append(wrap);
 
       const panel = $('#audio-panel-template').content.firstElementChild.cloneNode(true);
       panel.dataset.tabId = tab.id;
@@ -211,6 +234,30 @@
     saveTabs();
   }
 
+  async function removeTab(tab) {
+    const job = tab.job_id ? state.jobs.get(tab.job_id) : null;
+    if (job && ['queued', 'running'].includes(job.status)) {
+      toast(`Audio ${tab.number} is active. Cancel or wait for it before removing this tab.`, 'error');
+      return;
+    }
+    if (!confirm(`Remove Audio ${tab.number} and its saved workspace${job ? ' and generated file' : ''}?`)) return;
+    try {
+      if (job) {
+        await api(`/api/jobs/${job.id}?delete_file=true`, { method: 'DELETE' });
+        state.jobs.delete(job.id);
+      }
+      state.tabs = state.tabs.filter(item => item.id !== tab.id);
+      state.tabs.forEach((item, index) => { item.number = index + 1; });
+      state.activeId = state.tabs[Math.max(0, state.tabs.length - 1)].id;
+      buildTabs();
+      saveTabs();
+      renderQueue();
+      toast('Audio workspace removed.', 'success');
+    } catch (error) {
+      toast(error.message, 'error');
+    }
+  }
+
   function renderActive() {
     $$('.audio-tab').forEach(button => {
       const tab = state.tabs.find(item => item.id === button.dataset.tabId);
@@ -234,8 +281,8 @@
 
   function fillPanel(tab) {
     const panel = tab.panel;
-    const stringFields = ['title', 'text', 'preset', 'language', 'voice_filename', 'output_format', 'cut_start', 'cut_end'];
-    const numberFields = ['temperature', 'exaggeration', 'cfg_weight', 'speed_factor', 'seed', 'chunk_words'];
+    const stringFields = ['title', 'text', 'preset', 'language', 'voice_filename', 'generated_voice_name', 'generated_voice_description', 'generated_voice_text', 'generated_voice_filename', 'output_format', 'cut_start', 'cut_end'];
+    const numberFields = ['temperature', 'exaggeration', 'cfg_weight', 'speed_factor', 'seed', 'chunk_words', 'generated_voice_seed'];
     stringFields.forEach(name => {
       const element = field(panel, name);
       if (element && tab[name] !== undefined) element.value = tab[name];
@@ -259,11 +306,11 @@
   function captureTab(tab) {
     if (!tab?.panel) return;
     const panel = tab.panel;
-    ['title', 'text', 'preset', 'language', 'voice_filename', 'output_format', 'cut_start', 'cut_end'].forEach(name => {
+    ['title', 'text', 'preset', 'language', 'voice_filename', 'generated_voice_name', 'generated_voice_description', 'generated_voice_text', 'generated_voice_filename', 'output_format', 'cut_start', 'cut_end'].forEach(name => {
       const element = field(panel, name);
       if (element) tab[name] = element.value;
     });
-    ['temperature', 'exaggeration', 'cfg_weight', 'speed_factor', 'seed', 'chunk_words'].forEach(name => {
+    ['temperature', 'exaggeration', 'cfg_weight', 'speed_factor', 'seed', 'chunk_words', 'generated_voice_seed'].forEach(name => {
       const element = field(panel, name);
       if (element) tab[name] = Number(element.value);
     });
@@ -323,20 +370,36 @@
       button.classList.toggle('active', button.dataset.voiceMode === mode);
     });
 
+    const standardTools = panel.querySelector('[data-role="standard-voice-tools"]');
+    const designer = panel.querySelector('[data-role="voice-designer"]');
+    standardTools.classList.toggle('hidden', mode === 'generated');
+    designer.classList.toggle('hidden', mode !== 'generated');
+
+    const generatedSelect = field(panel, 'generated_voice_filename');
+    generatedSelect.innerHTML = '';
+    const generatedList = state.initial.generated_voices || [];
+    if (!generatedList.length) {
+      generatedSelect.add(new Option('Generate your first voice', ''));
+    } else {
+      generatedList.forEach(item => generatedSelect.add(new Option(item.filename, item.filename)));
+    }
+    if (tab.generated_voice_filename && generatedList.some(item => item.filename === tab.generated_voice_filename)) {
+      generatedSelect.value = tab.generated_voice_filename;
+    } else if (mode === 'generated') {
+      tab.generated_voice_filename = generatedSelect.value || '';
+    }
+    updateGeneratedVoiceDownload(tab);
+
+    if (mode === 'generated') {
+      tab.voice_filename = tab.generated_voice_filename || '';
+      return;
+    }
+
     const select = field(panel, 'voice_filename');
     const upload = panel.querySelector('[data-role="voice-upload-button"]');
     const preview = panel.querySelector('[data-action="preview-voice"]');
     const label = panel.querySelector('[data-role="voice-label"]');
     select.innerHTML = '';
-
-    if (mode === 'default') {
-      select.add(new Option('Model default voice', ''));
-      select.disabled = true;
-      upload.classList.add('hidden');
-      preview.disabled = true;
-      label.textContent = 'Voice';
-      return;
-    }
 
     const list = mode === 'predefined'
       ? state.initial.predefined_voices
@@ -363,6 +426,7 @@
       const voices = await api('/api/voices');
       state.initial.predefined_voices = voices.predefined;
       state.initial.reference_voices = voices.clone;
+      state.initial.generated_voices = voices.generated || [];
       state.tabs.forEach(updateVoiceControls);
       if (!quiet) toast('Voice list refreshed.', 'success');
     } catch (error) {
@@ -394,10 +458,6 @@
 
   function previewVoice(tab) {
     captureTab(tab);
-    if (tab.voice_mode === 'default') {
-      toast('Generate a short sample to hear the model default voice.');
-      return;
-    }
     if (!tab.voice_filename) {
       toast('Select or upload a voice first.', 'error');
       return;
@@ -406,6 +466,89 @@
     player.src = `/api/voices/${encodeURIComponent(tab.voice_mode)}/${encodeURIComponent(tab.voice_filename)}`;
     player.classList.remove('hidden');
     player.play().catch(() => toast('The browser could not play this voice preview.', 'error'));
+  }
+
+  function updateGeneratedVoiceDownload(tab) {
+    if (!tab?.panel) return;
+    const filename = field(tab.panel, 'generated_voice_filename')?.value || tab.generated_voice_filename || '';
+    const link = tab.panel.querySelector('[data-role="download-generated-voice"]');
+    if (!filename) {
+      link.href = '#';
+      link.classList.add('disabled');
+      return;
+    }
+    link.href = `/api/voices/generated/${encodeURIComponent(filename)}?download=true`;
+    link.download = filename;
+    link.classList.remove('disabled');
+  }
+
+  function previewGeneratedVoice(tab) {
+    captureTab(tab);
+    const filename = tab.generated_voice_filename;
+    if (!filename) {
+      toast('Generate or select a saved voice first.', 'error');
+      return;
+    }
+    const player = tab.panel.querySelector('[data-role="generated-voice-player"]');
+    player.src = `/api/voices/generated/${encodeURIComponent(filename)}`;
+    player.classList.remove('hidden');
+    player.play().catch(() => toast('The browser could not play this generated voice.', 'error'));
+  }
+
+  async function generateDesignedVoice(tab) {
+    captureTab(tab);
+    if (!tab.generated_voice_name.trim()) {
+      toast('Add a Voice Name.', 'error');
+      return;
+    }
+    if (tab.generated_voice_description.trim().length < 12) {
+      toast('Describe the speaker and voice style.', 'error');
+      return;
+    }
+    if (tab.generated_voice_text.trim().length < 4) {
+      toast('Add a short Voiceover Sample Text.', 'error');
+      return;
+    }
+    const activeJobs = [...state.jobs.values()].some(job => ['queued', 'running'].includes(job.status));
+    if (activeJobs) {
+      toast('Wait for the audio queue to finish before generating a new voice.', 'error');
+      return;
+    }
+
+    const button = tab.panel.querySelector('[data-action="generate-voice"]');
+    const status = tab.panel.querySelector('[data-role="voice-designer-status"]');
+    button.disabled = true;
+    button.textContent = 'Generating Voice...';
+    status.textContent = 'Loading the voice-design model and creating a reference sample. This can take several minutes the first time.';
+    try {
+      const result = await api('/api/voice-designer/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: tab.generated_voice_name,
+          description: tab.generated_voice_description,
+          sample_text: tab.generated_voice_text,
+          seed: Number(tab.generated_voice_seed || 2025),
+        }),
+      });
+      await refreshVoices(tab, true);
+      tab.voice_mode = 'generated';
+      tab.generated_voice_filename = result.filename;
+      tab.voice_filename = result.filename;
+      updateVoiceControls(tab);
+      field(tab.panel, 'generated_voice_filename').value = result.filename;
+      updateGeneratedVoiceDownload(tab);
+      saveTabs();
+      status.textContent = `Created ${result.filename} • ${formatTime(result.duration, true)}. It is selected for this Audio tab.`;
+      previewGeneratedVoice(tab);
+      toast('Generated voice created and selected.', 'success');
+    } catch (error) {
+      status.textContent = error.message;
+      toast(error.message, 'error');
+    } finally {
+      button.disabled = false;
+      button.textContent = 'Generate Voice';
+    }
   }
 
   function wirePanel(tab) {
@@ -434,15 +577,16 @@
     panel.querySelector('[data-role="voice-upload"]').addEventListener('change', event => uploadVoice(tab, event.target.files[0]));
     panel.querySelector('[data-action="refresh-voices"]').addEventListener('click', () => refreshVoices(tab));
     panel.querySelector('[data-action="preview-voice"]').addEventListener('click', () => previewVoice(tab));
-
-    $$('[data-quick]', panel).forEach(button => button.addEventListener('click', () => {
-      if (!tab.waveform) return;
-      field(panel, 'cut_start').value = '0:00';
-      field(panel, 'cut_end').value = formatTime(Math.min(Number(button.dataset.quick), tab.waveform.duration), true);
-      captureTab(tab);
-      updateCutSummary(tab);
+    panel.querySelector('[data-action="generate-voice"]').addEventListener('click', () => generateDesignedVoice(tab));
+    panel.querySelector('[data-action="preview-generated-voice"]').addEventListener('click', () => previewGeneratedVoice(tab));
+    field(panel, 'generated_voice_filename').addEventListener('change', event => {
+      tab.generated_voice_filename = event.target.value;
+      tab.voice_filename = event.target.value;
+      updateGeneratedVoiceDownload(tab);
       saveTabs();
-    }));
+    });
+    panel.querySelector('[data-action="toggle-playback"]').addEventListener('click', () => togglePlayback(tab));
+    panel.querySelector('[data-role="playback-progress"]').addEventListener('input', event => seekPlayback(tab, Number(event.target.value) / 1000));
 
     panel.querySelector('[data-action="set-start-mode"]').addEventListener('click', () => setClickMode(tab, 'start'));
     panel.querySelector('[data-action="set-end-mode"]').addEventListener('click', () => setClickMode(tab, 'end'));
@@ -499,7 +643,7 @@
       title: tab.title,
       text: tab.text,
       voice_mode: tab.voice_mode,
-      voice_filename: tab.voice_mode === 'default' ? null : tab.voice_filename,
+      voice_filename: tab.voice_mode === 'generated' ? tab.generated_voice_filename : tab.voice_filename,
       options: optionsFor(tab),
     };
   }
@@ -507,7 +651,8 @@
   function validateTab(tab) {
     captureTab(tab);
     if (!tab.text.trim()) return `Audio ${tab.number} has no script.`;
-    if (tab.voice_mode !== 'default' && !tab.voice_filename) {
+    const selectedVoice = tab.voice_mode === 'generated' ? tab.generated_voice_filename : tab.voice_filename;
+    if (!selectedVoice) {
       return `Audio ${tab.number} needs a selected voice.`;
     }
     return '';
@@ -580,6 +725,38 @@
     } finally {
       button.disabled = false;
       button.textContent = 'Generate All';
+    }
+  }
+
+  async function removeAll() {
+    const active = [...state.jobs.values()].some(job => ['queued', 'running'].includes(job.status));
+    if (active) {
+      toast('Wait for all queued audio jobs to finish before using Remove All.', 'error');
+      return;
+    }
+    if (!confirm('Remove all titles, scripts, completed jobs and generated audio files? Your saved voice files will remain.')) return;
+    const button = $('#remove-all');
+    button.disabled = true;
+    button.textContent = 'Removing...';
+    try {
+      await api('/api/jobs', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ delete_files: true }),
+      });
+      state.jobs.clear();
+      state.tabs = [defaultTab(1), defaultTab(2)];
+      state.activeId = state.tabs[0].id;
+      localStorage.removeItem(STORAGE_KEY);
+      buildTabs();
+      renderQueue();
+      updateFloating();
+      toast('All audio workspaces are ready for new scripts.', 'success');
+    } catch (error) {
+      toast(error.message, 'error');
+    } finally {
+      button.disabled = false;
+      button.textContent = 'Remove All';
     }
   }
 
@@ -847,6 +1024,7 @@
     const audioUrl = `/api/jobs/${job.id}/audio`;
     const player = panel.querySelector('[data-role="main-player"]');
     player.src = audioUrl;
+    wirePlayback(tab);
     const download = panel.querySelector('[data-role="download-original"]');
     download.href = `${audioUrl}?download=true`;
     download.download = '';
@@ -871,6 +1049,7 @@
         zoom: 1,
         mode: 'end',
         selected: 0,
+        playhead: 0,
         dragStartX: 0,
         dragStartScroll: 0,
       };
@@ -883,8 +1062,49 @@
       status.textContent = 'Move the mouse to see time. Click to set Start or End. Zoom and drag left or right for a clearer view.';
       saveTabs();
     } catch (error) {
-      status.textContent = 'Could not load waveform. The normal audio player and Download WAV still work.';
+      status.textContent = 'Could not load waveform. The playback controls and Download WAV still work.';
     }
+  }
+
+  function wirePlayback(tab) {
+    const panel = tab.panel;
+    const player = panel.querySelector('[data-role="main-player"]');
+    if (player.dataset.wired === 'true') return;
+    player.dataset.wired = 'true';
+    const button = panel.querySelector('[data-action="toggle-playback"]');
+    const progress = panel.querySelector('[data-role="playback-progress"]');
+    const time = panel.querySelector('[data-role="playback-time"]');
+
+    const update = () => {
+      const duration = Number.isFinite(player.duration) ? player.duration : (tab.waveform?.duration || 0);
+      const current = Number.isFinite(player.currentTime) ? player.currentTime : 0;
+      time.textContent = `${formatTime(current)} / ${formatTime(duration)}`;
+      progress.value = duration > 0 ? Math.round((current / duration) * 1000) : 0;
+      if (tab.waveform) {
+        tab.waveform.playhead = current;
+        drawWave(tab);
+      }
+    };
+    player.addEventListener('loadedmetadata', update);
+    player.addEventListener('timeupdate', update);
+    player.addEventListener('play', () => { button.textContent = 'Pause'; update(); });
+    player.addEventListener('pause', () => { button.textContent = 'Play'; update(); });
+    player.addEventListener('ended', () => { button.textContent = 'Play'; update(); });
+    update();
+  }
+
+  function togglePlayback(tab) {
+    const player = tab.panel.querySelector('[data-role="main-player"]');
+    if (!player.src) return;
+    if (player.paused) player.play().catch(() => toast('The browser could not play this audio.', 'error'));
+    else player.pause();
+  }
+
+  function seekPlayback(tab, fraction) {
+    const player = tab.panel.querySelector('[data-role="main-player"]');
+    const duration = Number.isFinite(player.duration) ? player.duration : tab.waveform?.duration;
+    if (!duration) return;
+    player.currentTime = Math.max(0, Math.min(duration, duration * fraction));
   }
 
   function waveTimeFromEvent(tab, event) {
@@ -1008,6 +1228,19 @@
     context.moveTo(endX, 0);
     context.lineTo(endX, height);
     context.stroke();
+
+    const playhead = Math.max(0, Math.min(wave.duration, Number(wave.playhead || 0)));
+    const playX = (playhead / Math.max(wave.duration, 0.001)) * width;
+    context.strokeStyle = '#111827';
+    context.lineWidth = 2;
+    context.beginPath();
+    context.moveTo(playX, 0);
+    context.lineTo(playX, height);
+    context.stroke();
+    context.fillStyle = '#111827';
+    context.beginPath();
+    context.arc(playX, 7, 5, 0, Math.PI * 2);
+    context.fill();
   }
 
   function setClickMode(tab, mode) {
@@ -1136,6 +1369,7 @@
 
     $('#load-model').addEventListener('click', loadModel);
     $('#generate-all').addEventListener('click', generateAll);
+    $('#remove-all').addEventListener('click', removeAll);
     $('#open-monitor').addEventListener('click', openMonitor);
     $('#close-monitor').addEventListener('click', closeMonitor);
     $('#minimise-monitor').addEventListener('click', minimiseMonitor);

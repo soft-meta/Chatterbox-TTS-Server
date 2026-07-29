@@ -22,13 +22,16 @@ from models import (
     GenerateAllRequest,
     ModelLoadRequest,
     OpenAITTSRequest,
+    RemoveJobsRequest,
+    VoiceDesignRequest,
 )
 from queue_manager import QueueManager
 from storage import AUDIO_EXTENSIONS, Storage
 from utils import safe_filename
+from voice_designer import VoiceDesigner
 
 APP_NAME = "SoftMeta Chatterbox TTS Server"
-APP_VERSION = "0.2.1"
+APP_VERSION = "0.3.0"
 logger = logging.getLogger("softmeta.chatterbox")
 
 config = load_config()
@@ -36,6 +39,8 @@ storage = Storage()
 engine = EngineService(device=config["tts_engine"]["device"])
 queue = QueueManager(engine=engine, storage=storage)
 model_load_task: asyncio.Task | None = None
+voice_design_lock = asyncio.Lock()
+voice_designer = VoiceDesigner(storage.generated, device=engine.device)
 
 MODELS = [
     {
@@ -194,6 +199,7 @@ def initial_data() -> dict[str, Any]:
         "engine": engine.status(),
         "predefined_voices": storage.list_audio(storage.voices),
         "reference_voices": storage.list_audio(storage.references),
+        "generated_voices": storage.list_audio(storage.generated),
         "presets": PRESETS,
         "defaults": config["generation_defaults"],
         "jobs": queue.list_jobs(),
@@ -233,6 +239,7 @@ def voices() -> dict[str, Any]:
     return {
         "predefined": storage.list_audio(storage.voices),
         "clone": storage.list_audio(storage.references),
+        "generated": storage.list_audio(storage.generated),
     }
 
 
@@ -260,8 +267,8 @@ async def upload_voice(
 
 
 @app.get("/api/voices/{kind}/{filename}")
-def preview_voice(kind: str, filename: str) -> FileResponse:
-    if kind not in {"predefined", "clone"}:
+def preview_voice(kind: str, filename: str, download: bool = False) -> FileResponse:
+    if kind not in {"predefined", "clone", "generated"}:
         raise HTTPException(400, "Invalid voice type.")
     try:
         path = storage.voice_path(kind, filename)
@@ -270,9 +277,51 @@ def preview_voice(kind: str, filename: str) -> FileResponse:
     return FileResponse(
         path,
         media_type=storage.media_type(path),
-        filename=path.name,
-        headers={"Cache-Control": "no-store"},
+        filename=path.name if download else None,
+        headers={"Cache-Control": "no-store", "Accept-Ranges": "bytes"},
     )
+
+
+@app.post("/api/voice-designer/generate")
+async def generate_designed_voice(request: VoiceDesignRequest) -> dict[str, Any]:
+    if queue.has_active_jobs():
+        raise HTTPException(409, "Wait for the audio queue to finish before generating a new voice.")
+    if voice_design_lock.locked():
+        raise HTTPException(409, "A voice sample is already being generated.")
+
+    async with voice_design_lock:
+        previous_model = engine.loaded_model
+        try:
+            await asyncio.get_running_loop().run_in_executor(queue.executor, engine.unload)
+            path = await asyncio.get_running_loop().run_in_executor(
+                queue.executor,
+                lambda: voice_designer.generate(
+                    name=request.name,
+                    description=request.description,
+                    sample_text=request.sample_text,
+                    seed=request.seed,
+                ),
+            )
+        except Exception as error:
+            raise HTTPException(500, f"Voice generation failed: {type(error).__name__}: {error}") from error
+        finally:
+            if previous_model:
+                try:
+                    await asyncio.get_running_loop().run_in_executor(
+                        queue.executor, engine.load, previous_model
+                    )
+                except Exception:
+                    logger.exception("Could not reload Chatterbox after voice design")
+
+    info = sf.info(path)
+    return {
+        "filename": path.name,
+        "size": path.stat().st_size,
+        "duration": round(float(info.duration), 3),
+        "kind": "generated",
+        "preview_url": f"/api/voices/generated/{path.name}",
+        "download_url": f"/api/voices/generated/{path.name}?download=true",
+    }
 
 
 @app.get("/api/jobs")
@@ -310,6 +359,26 @@ async def cancel_job(job_id: str) -> dict[str, Any]:
         return await queue.cancel(job_id)
     except KeyError as error:
         raise HTTPException(404, "Job not found.") from error
+
+
+@app.delete("/api/jobs")
+async def remove_all_jobs(request: RemoveJobsRequest | None = None) -> dict[str, Any]:
+    try:
+        await queue.clear(delete_files=True if request is None else request.delete_files)
+    except RuntimeError as error:
+        raise HTTPException(409, str(error)) from error
+    return {"ok": True}
+
+
+@app.delete("/api/jobs/{job_id}")
+async def remove_job(job_id: str, delete_file: bool = True) -> dict[str, Any]:
+    try:
+        await queue.delete(job_id, delete_file=delete_file)
+    except KeyError as error:
+        raise HTTPException(404, "Job not found.") from error
+    except RuntimeError as error:
+        raise HTTPException(409, str(error)) from error
+    return {"ok": True}
 
 
 @app.get("/api/jobs/{job_id}/audio")

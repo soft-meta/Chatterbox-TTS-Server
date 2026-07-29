@@ -33,13 +33,13 @@ class AudioJobCreate(BaseModel):
     audio_number: int = Field(1, ge=1, le=5)
     title: str = Field("", max_length=180)
     text: str = Field(..., min_length=1)
-    voice_mode: Literal["predefined", "clone", "default"] = "default"
+    voice_mode: Literal["predefined", "clone", "generated", "default"] = "clone"
     voice_filename: str | None = None
     options: GenerationOptions = Field(default_factory=GenerationOptions)
 
     @model_validator(mode="after")
     def validate_voice(self) -> "AudioJobCreate":
-        if self.voice_mode in {"predefined", "clone"} and not self.voice_filename:
+        if self.voice_mode in {"predefined", "clone", "generated"} and not self.voice_filename:
             raise ValueError("Select or upload a voice for the selected voice mode.")
         return self
 
@@ -52,6 +52,17 @@ class CutRequest(BaseModel):
     start_seconds: float = Field(0.0, ge=0.0)
     end_seconds: float | None = Field(None, gt=0.0)
     filename_prefix: str = Field("Selected", max_length=80)
+
+
+class VoiceDesignRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=80)
+    description: str = Field(..., min_length=12, max_length=1200)
+    sample_text: str = Field(..., min_length=4, max_length=800)
+    seed: int = Field(2025, ge=0, le=2_147_483_647)
+
+
+class RemoveJobsRequest(BaseModel):
+    delete_files: bool = True
 
 
 class ModelLoadRequest(BaseModel):

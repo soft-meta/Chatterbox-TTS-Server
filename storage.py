@@ -17,10 +17,11 @@ class Storage:
         config = load_config()
         self.voices = ROOT / config["tts_engine"]["predefined_voices_path"]
         self.references = ROOT / config["tts_engine"]["reference_audio_path"]
+        self.generated = ROOT / config["tts_engine"].get("generated_voices_path", "generated_voices")
         self.outputs = ROOT / config["storage"]["outputs_path"]
         self.data = ROOT / config["storage"]["data_path"]
         self.logs = ROOT / config["storage"]["logs_path"]
-        for directory in (self.voices, self.references, self.outputs, self.data, self.logs):
+        for directory in (self.voices, self.references, self.generated, self.outputs, self.data, self.logs):
             directory.mkdir(parents=True, exist_ok=True)
         self.jobs_file = self.data / "jobs.json"
         self._lock = RLock()
@@ -33,7 +34,14 @@ class Storage:
         return items
 
     def voice_path(self, kind: str, filename: str) -> Path:
-        directory = self.voices if kind == "predefined" else self.references
+        directories = {
+            "predefined": self.voices,
+            "clone": self.references,
+            "generated": self.generated,
+        }
+        if kind not in directories:
+            raise FileNotFoundError(filename)
+        directory = directories[kind]
         path = resolve_inside(directory, filename)
         if not path.is_file() or path.suffix.lower() not in AUDIO_EXTENSIONS:
             raise FileNotFoundError(filename)
@@ -56,6 +64,18 @@ class Storage:
             return data if isinstance(data, dict) else {}
         except (OSError, json.JSONDecodeError):
             return {}
+
+
+    def delete_output_artifacts(self, filename: str) -> None:
+        path = self.output_path(filename)
+        path.unlink(missing_ok=True)
+        for cache in self.outputs.glob(f"{path.stem}.*.peaks.json"):
+            cache.unlink(missing_ok=True)
+
+    def clear_outputs(self) -> None:
+        for path in self.outputs.iterdir():
+            if path.is_file() and path.name != "README.md":
+                path.unlink(missing_ok=True)
 
     @staticmethod
     def media_type(path: Path) -> str:

@@ -7,6 +7,7 @@ services:
       - ./outputs:/app/outputs
       - ./reference_audio:/app/reference_audio
       - ./voices:/app/voices
+      - ./generated_voices:/app/generated_voices
       - ./data:/app/data
     environment:
       SOFTMETA_HOST: 0.0.0.0

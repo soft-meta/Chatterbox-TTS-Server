@@ -21,6 +21,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "default_model": "chatterbox",
         "predefined_voices_path": "voices",
         "reference_audio_path": "reference_audio",
+        "generated_voices_path": "generated_voices",
     },
     "storage": {
         "outputs_path": "outputs",

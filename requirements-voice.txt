@@ -1,0 +1,3 @@
+# Optional Generate Voice dependency.
+# Install with --no-deps so Chatterbox keeps its tested Transformers patch version.
+parler-tts==0.2.3
