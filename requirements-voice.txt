@@ -1,5 +1,8 @@
-# Install this file inside a separate virtual environment created with
-# --system-site-packages. Parler-TTS 0.2.3 requires Transformers 4.46.1,
-# while Chatterbox 0.1.7 uses a newer incompatible Transformers release.
-parler-tts==0.2.3
+# Isolated Qwen3-TTS VoiceDesign environment.
+# Installed in a separate micromamba environment to avoid Transformers conflicts
+# with the Chatterbox runtime.
+qwen-tts==0.1.1
+speechbrain==1.0.3
 soundfile==0.13.1
+scipy==1.15.3
+setuptools==80.9.0

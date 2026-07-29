@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.5.0
+
+- Replaced Parler-TTS Generate Voice with official Qwen3-TTS VoiceDesign
+- Added 2–4 fictional voice candidates per request
+- Added age-aware natural phrase and pause instructions without global slowdown
+- Added seed-driven identity variation across pitch, resonance, texture, articulation, personality and cadence
+- Added candidate preview, download, save and reuse workflow
+- Added optional SpeechBrain ECAPA voice-difference checking and embedding cache
+- Added isolated Qwen3-TTS Colab environment
+- Updated server and UI version to 0.5.0
+
+## v0.4.0
+
+- Added explicit speaker age, gender, US English accent and emotion fields
+- Added age-based pacing from mature adult through 90+ elderly delivery
+- Added a Natural Human Voice Formula and UI profile preview
+- Added stable gender-matched Parler speaker identity selection by seed
+- Added gentle pitch-preserving age tempo correction
+- Added automatic recommended final Chatterbox speed
+- Added generated voice JSON profile metadata
+- Updated server and UI version to 0.4.0
+
 ## v0.3.1
 
 - Fixed Generate Voice import failures caused by incompatible Transformers requirements

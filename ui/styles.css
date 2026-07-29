@@ -479,3 +479,124 @@ html.dark .voice-designer { border-color: #4b477c; background: #252948; }
 .queue-empty, .monitor-preview-title, .generation-meta, .cut-summary { font-size: 15px; }
 .playback-time { font-size: 15px; }
 .voice-designer-status { line-height: 1.5; }
+
+/* v0.4.0 age-aware natural voice designer */
+.voice-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+.age-profile-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 18px;
+  margin-top: 15px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--primary), transparent 65%);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--primary), transparent 94%);
+}
+.age-profile-card > div:first-child { display: grid; gap: 4px; }
+.age-profile-card strong { font-size: 16px; }
+.age-profile-card span { color: var(--muted); line-height: 1.45; }
+.age-speed-badge {
+  min-width: 170px;
+  padding: 9px 12px;
+  border-radius: 9px;
+  background: var(--surface);
+  text-align: center;
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.age-speed-badge span { display: block; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+.age-speed-badge strong { display: block; margin-top: 2px; color: var(--primary-dark); font-size: 21px; font-variant-numeric: tabular-nums; }
+.voice-formula-details {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+}
+.voice-formula-details summary { color: var(--primary-dark); font-weight: 800; cursor: pointer; }
+.voice-formula-details p { margin: 10px 0 0; color: var(--text-soft); font-size: 14px; line-height: 1.65; }
+@media (max-width: 900px) {
+  .voice-profile-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 620px) {
+  .voice-profile-grid { grid-template-columns: 1fr; }
+  .age-profile-card { align-items: stretch; flex-direction: column; }
+  .age-speed-badge { width: 100%; }
+}
+
+/* SoftMeta v0.5.0 Qwen3-TTS voice candidates */
+.age-speed-badge small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.voice-candidate-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+.voice-candidate-card {
+  min-width: 0;
+  padding: 15px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface);
+  box-shadow: 0 5px 16px rgba(30, 34, 70, .07);
+}
+html.dark .voice-candidate-card { box-shadow: 0 5px 16px rgba(0, 0, 0, .18); }
+.voice-candidate-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.voice-candidate-head > div { display: grid; gap: 3px; }
+.voice-candidate-head strong { font-size: 17px; }
+.voice-candidate-head span:not(.voice-uniqueness) { color: var(--muted); font-size: 13px; }
+.voice-uniqueness {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.voice-uniqueness.unique { color: #17653a; background: #ddf7e7; }
+.voice-uniqueness.review { color: #765800; background: #fff1bd; }
+.voice-uniqueness.too-similar { color: #8a2630; background: #ffe0e3; }
+.voice-uniqueness.not-checked { color: var(--text-soft); background: var(--surface-soft); }
+html.dark .voice-uniqueness.unique { color: #a9efc4; background: #18472f; }
+html.dark .voice-uniqueness.review { color: #ffe59b; background: #574616; }
+html.dark .voice-uniqueness.too-similar { color: #ffb8bf; background: #5b252c; }
+.voice-candidate-traits,
+.voice-candidate-closest {
+  margin: 10px 0 0;
+  color: var(--text-soft);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.voice-candidate-closest { margin-top: 4px; color: var(--muted); }
+.voice-candidate-card audio {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+}
+.voice-candidate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.voice-candidate-actions .button { flex: 1 1 130px; }
+@media (max-width: 620px) {
+  .voice-candidate-list { grid-template-columns: 1fr; }
+  .voice-candidate-head { align-items: stretch; flex-direction: column; }
+  .voice-uniqueness { align-self: flex-start; }
+}

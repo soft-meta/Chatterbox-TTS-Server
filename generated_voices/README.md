@@ -1,9 +1,8 @@
-# Generated voice references
+# Generated Voices
 
-Voice samples created by the optional SoftMeta **Generate Voice** tool are stored
-here at runtime. They are reusable Chatterbox reference WAV files and may be
-previewed or downloaded from the browser studio.
+Age-aware voice reference WAV files created by SoftMeta are saved here.
+Each WAV also receives a JSON sidecar containing the age, gender, US English
+voice profile, speaker identity, emotion, effective prompt and recommended
+final Chatterbox speed.
 
-Generated files are intentionally excluded from Git commits. Text-described
-voice characteristics are approximate and should not be presented as a real
-person without permission.
+Generated characteristics are approximate. Use only lawful, consensual voices.

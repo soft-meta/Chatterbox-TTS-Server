@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import shutil
+import time
 from pathlib import Path
 from threading import RLock
 from typing import Any
@@ -21,7 +23,16 @@ class Storage:
         self.outputs = ROOT / config["storage"]["outputs_path"]
         self.data = ROOT / config["storage"]["data_path"]
         self.logs = ROOT / config["storage"]["logs_path"]
-        for directory in (self.voices, self.references, self.generated, self.outputs, self.data, self.logs):
+        self.voice_candidates = self.data / "voice_candidates"
+        for directory in (
+            self.voices,
+            self.references,
+            self.generated,
+            self.outputs,
+            self.data,
+            self.logs,
+            self.voice_candidates,
+        ):
             directory.mkdir(parents=True, exist_ok=True)
         self.jobs_file = self.data / "jobs.json"
         self._lock = RLock()
@@ -30,7 +41,25 @@ class Storage:
         items = []
         for path in sorted(directory.iterdir(), key=lambda item: item.name.lower()):
             if path.is_file() and path.suffix.lower() in AUDIO_EXTENSIONS:
-                items.append({"filename": path.name, "size": path.stat().st_size})
+                metadata_path = path.with_suffix(".json")
+                metadata: dict[str, Any] = {}
+                if metadata_path.exists():
+                    try:
+                        loaded = json.loads(metadata_path.read_text(encoding="utf-8"))
+                        if isinstance(loaded, dict):
+                            metadata = loaded
+                    except (OSError, json.JSONDecodeError):
+                        metadata = {}
+                items.append(
+                    {
+                        "filename": path.name,
+                        "size": path.stat().st_size,
+                        "display_name": metadata.get("name") or path.stem,
+                        "age": metadata.get("age"),
+                        "gender": metadata.get("gender"),
+                        "accent": metadata.get("accent"),
+                    }
+                )
         return items
 
     def voice_path(self, kind: str, filename: str) -> Path:
@@ -46,6 +75,33 @@ class Storage:
         if not path.is_file() or path.suffix.lower() not in AUDIO_EXTENSIONS:
             raise FileNotFoundError(filename)
         return path
+
+    def candidate_session_path(self, session_id: str) -> Path:
+        safe = "".join(character for character in session_id if character.isalnum() or character in "-_")
+        if not safe or safe != session_id:
+            raise FileNotFoundError(session_id)
+        path = resolve_inside(self.voice_candidates, safe)
+        if not path.is_dir():
+            raise FileNotFoundError(session_id)
+        return path
+
+    def candidate_path(self, session_id: str, filename: str) -> Path:
+        session = self.candidate_session_path(session_id)
+        path = resolve_inside(session, filename)
+        if not path.is_file() or path.suffix.lower() not in AUDIO_EXTENSIONS:
+            raise FileNotFoundError(filename)
+        return path
+
+    def cleanup_voice_candidates(self, max_age_hours: float = 24.0) -> None:
+        cutoff = time.time() - max_age_hours * 3600
+        for path in self.voice_candidates.iterdir():
+            if not path.is_dir():
+                continue
+            try:
+                if path.stat().st_mtime < cutoff:
+                    shutil.rmtree(path, ignore_errors=True)
+            except OSError:
+                continue
 
     def output_path(self, filename: str) -> Path:
         return resolve_inside(self.outputs, filename)
@@ -64,7 +120,6 @@ class Storage:
             return data if isinstance(data, dict) else {}
         except (OSError, json.JSONDecodeError):
             return {}
-
 
     def delete_output_artifacts(self, filename: str) -> None:
         path = self.output_path(filename)

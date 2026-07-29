@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f7f9fc">
   <title>SoftMeta Chatterbox TTS Server</title>
-  <link rel="stylesheet" href="/static/styles.css?v=0.3.1">
+  <link rel="stylesheet" href="/static/styles.css?v=0.5.0">
 </head>
 <body>
   <header class="app-header">
@@ -65,7 +65,7 @@
   </main>
 
   <footer class="app-footer">
-    <span><a href="https://github.com/soft-meta/chatterbox-v2" target="_blank" rel="noopener">SoftMeta Chatterbox TTS</a> Server v0.3.1</span>
+    <span><a href="https://github.com/soft-meta/chatterbox-v2" target="_blank" rel="noopener">SoftMeta Chatterbox TTS</a> Server v0.5.0</span>
     <span>Powered by the official open-source Chatterbox engine</span>
   </footer>
 
@@ -155,27 +155,90 @@
 
         <div data-role="voice-designer" class="voice-designer hidden">
           <div class="voice-designer-intro">
-            <h3>Generate a New Voice Reference</h3>
-            <p>Describe the speaker and provide a short sample line. SoftMeta generates a reference WAV, then Chatterbox can clone it for your long-form audio.</p>
+            <h3>Generate Unique Natural Human Voices</h3>
+            <p>SoftMeta uses the official Qwen3-TTS VoiceDesign model to create several new fictional American speaker identities. Preview the candidates, compare their difference score, then save only the voice you want to reuse with Chatterbox.</p>
           </div>
-          <div class="voice-designer-grid">
+
+          <div class="voice-profile-grid">
             <label class="field">
               <span>Voice Name</span>
-              <input data-field="generated_voice_name" type="text" maxlength="80" placeholder="American Male 50 Warm">
+              <input data-field="generated_voice_name" type="text" maxlength="80" placeholder="American Male 70 Warm">
             </label>
             <label class="field">
-              <span>Generation Seed</span>
+              <span>Speaker Age</span>
+              <input data-field="generated_voice_age" type="number" min="18" max="110" value="50">
+            </label>
+            <label class="field">
+              <span>Gender</span>
+              <select data-field="generated_voice_gender">
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Language and Accent</span>
+              <select data-field="generated_voice_language">
+                <option value="en-US">US English (General American accent)</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Main Emotion</span>
+              <select data-field="generated_voice_emotion">
+                <option value="warm">Warm and sincere</option>
+                <option value="calm">Calm and steady</option>
+                <option value="reflective">Reflective and thoughtful</option>
+                <option value="concerned">Concerned and careful</option>
+                <option value="serious">Serious and grounded</option>
+                <option value="hopeful">Gentle and hopeful</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Base Variation Seed</span>
               <input data-field="generated_voice_seed" type="number" min="0" max="2147483647" value="2025">
             </label>
+            <label class="field">
+              <span>Voice Candidates</span>
+              <select data-field="generated_voice_candidate_count">
+                <option value="2">2 candidates</option>
+                <option value="3" selected>3 candidates</option>
+                <option value="4">4 candidates</option>
+              </select>
+            </label>
           </div>
+
+          <div class="age-profile-card">
+            <div>
+              <strong data-role="age-profile-title">Age 50 profile</strong>
+              <span data-role="age-profile-summary">Thoughtful pacing created through natural phrase groups and pauses.</span>
+            </div>
+            <div class="age-speed-badge">
+              <span>Final speed</span>
+              <strong data-role="age-speed-value">1.00×</strong>
+              <small>No global slowdown</small>
+            </div>
+          </div>
+
           <label class="field voice-description-field">
-            <span>Voice Description</span>
-            <textarea data-field="generated_voice_description" rows="4" placeholder="A 50-year-old American man with a warm, confident, natural voice, medium-low pitch, relaxed pace, subtle emotion, and clear American pronunciation."></textarea>
+            <span>Additional Voice Notes</span>
+            <textarea data-field="generated_voice_description" rows="4" placeholder="Optional: low warm baritone, slightly dry texture, reserved personality, private one-to-one conversation. Age behaviour and American accent are applied automatically."></textarea>
           </label>
           <label class="field voice-sample-field">
             <span>Voiceover Sample Text</span>
             <textarea data-field="generated_voice_text" rows="3" placeholder="Today, I want to share a simple lesson that can make life feel calmer and more meaningful."></textarea>
           </label>
+
+          <details class="voice-formula-details">
+            <summary>Natural Human Voice Formula</summary>
+            <p data-role="voice-formula-preview"></p>
+          </details>
+
+          <div class="voice-designer-actions">
+            <button data-action="generate-voice" class="button button-primary" type="button">Generate Candidates</button>
+            <span data-role="voice-designer-status" class="voice-designer-status">The first use downloads the official Qwen3-TTS VoiceDesign model. It may take several minutes.</span>
+          </div>
+
+          <div data-role="voice-candidate-list" class="voice-candidate-list hidden" aria-live="polite"></div>
+
           <div class="generated-voice-library">
             <label class="field grow">
               <span>Saved Generated Voices</span>
@@ -184,12 +247,8 @@
             <button data-action="preview-generated-voice" class="button button-secondary" type="button">Preview</button>
             <a data-role="download-generated-voice" class="button button-secondary disabled" href="#" download>Download</a>
           </div>
-          <div class="voice-designer-actions">
-            <button data-action="generate-voice" class="button button-primary" type="button">Generate Voice</button>
-            <span data-role="voice-designer-status" class="voice-designer-status">The first use downloads the Parler-TTS voice-design model.</span>
-          </div>
           <audio data-role="generated-voice-player" class="voice-player hidden" controls preload="metadata"></audio>
-          <p class="voice-help">Text-described voices are approximate. Age, accent and identity can vary. Generate several seeds and keep the sample you prefer.</p>
+          <p class="voice-help">Each candidate is a new fictional voice identity. The difference score compares it with saved generated voices and other candidates when the optional speaker-embedding checker is available. Listen before saving because no model can guarantee a precise biological age or completely unique identity.</p>
         </div>
       </section>
 
@@ -312,6 +371,6 @@
     </article>
   </template>
 
-  <script src="/static/app.js?v=0.3.1" defer></script>
+  <script src="/static/app.js?v=0.5.0" defer></script>
 </body>
 </html>

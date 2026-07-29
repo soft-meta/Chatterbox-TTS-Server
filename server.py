@@ -24,6 +24,7 @@ from models import (
     OpenAITTSRequest,
     RemoveJobsRequest,
     VoiceDesignRequest,
+    VoiceCandidateSaveRequest,
 )
 from queue_manager import QueueManager
 from storage import AUDIO_EXTENSIONS, Storage
@@ -31,7 +32,7 @@ from utils import safe_filename
 from voice_designer import VoiceDesigner
 
 APP_NAME = "SoftMeta Chatterbox TTS Server"
-APP_VERSION = "0.3.1"
+APP_VERSION = "0.5.0"
 logger = logging.getLogger("softmeta.chatterbox")
 
 config = load_config()
@@ -40,7 +41,11 @@ engine = EngineService(device=config["tts_engine"]["device"])
 queue = QueueManager(engine=engine, storage=storage)
 model_load_task: asyncio.Task | None = None
 voice_design_lock = asyncio.Lock()
-voice_designer = VoiceDesigner(storage.generated, device=engine.device)
+voice_designer = VoiceDesigner(
+    storage.generated,
+    storage.voice_candidates,
+    device=engine.device,
+)
 
 MODELS = [
     {
@@ -282,24 +287,49 @@ def preview_voice(kind: str, filename: str, download: bool = False) -> FileRespo
     )
 
 
+@app.get("/api/voice-designer/candidates/{session_id}/{filename}")
+def preview_voice_candidate(
+    session_id: str,
+    filename: str,
+    download: bool = False,
+) -> FileResponse:
+    try:
+        path = storage.candidate_path(session_id, filename)
+    except FileNotFoundError as error:
+        raise HTTPException(404, "Voice candidate was not found or has expired.") from error
+    return FileResponse(
+        path,
+        media_type=storage.media_type(path),
+        filename=path.name if download else None,
+        headers={"Cache-Control": "no-store", "Accept-Ranges": "bytes"},
+    )
+
+
 @app.post("/api/voice-designer/generate")
 async def generate_designed_voice(request: VoiceDesignRequest) -> dict[str, Any]:
     if queue.has_active_jobs():
-        raise HTTPException(409, "Wait for the audio queue to finish before generating a new voice.")
+        raise HTTPException(409, "Wait for the audio queue to finish before generating new voices.")
     if voice_design_lock.locked():
-        raise HTTPException(409, "A voice sample is already being generated.")
+        raise HTTPException(409, "Voice candidates are already being generated.")
 
     async with voice_design_lock:
         previous_model = engine.loaded_model
         try:
+            storage.cleanup_voice_candidates()
             await asyncio.get_running_loop().run_in_executor(queue.executor, engine.unload)
-            path = await asyncio.get_running_loop().run_in_executor(
+            result = await asyncio.get_running_loop().run_in_executor(
                 queue.executor,
-                lambda: voice_designer.generate(
+                lambda: voice_designer.generate_candidates(
                     name=request.name,
+                    age=request.age,
+                    gender=request.gender,
+                    language=request.language,
+                    emotion=request.emotion,
                     description=request.description,
                     sample_text=request.sample_text,
                     seed=request.seed,
+                    candidate_count=request.candidate_count,
+                    uniqueness_threshold=request.uniqueness_threshold,
                 ),
             )
         except Exception as error:
@@ -312,6 +342,38 @@ async def generate_designed_voice(request: VoiceDesignRequest) -> dict[str, Any]
                     )
                 except Exception:
                     logger.exception("Could not reload Chatterbox after voice design")
+
+    session_id = result["session_id"]
+    public_candidates = []
+    for candidate in result["candidates"]:
+        filename = candidate["filename"]
+        public_candidates.append(
+            {
+                **candidate,
+                "preview_url": f"/api/voice-designer/candidates/{session_id}/{filename}",
+                "download_url": f"/api/voice-designer/candidates/{session_id}/{filename}?download=true",
+            }
+        )
+    return {**result, "candidates": public_candidates}
+
+
+@app.post("/api/voice-designer/save")
+async def save_voice_candidate(request: VoiceCandidateSaveRequest) -> dict[str, Any]:
+    if queue.has_active_jobs():
+        raise HTTPException(409, "Wait for the audio queue to finish before saving a generated voice.")
+    try:
+        path = await asyncio.get_running_loop().run_in_executor(
+            queue.executor,
+            lambda: voice_designer.save_candidate(
+                session_id=request.session_id,
+                filename=request.filename,
+                voice_name=request.voice_name,
+            ),
+        )
+    except FileNotFoundError as error:
+        raise HTTPException(404, "Voice candidate was not found or has expired.") from error
+    except Exception as error:
+        raise HTTPException(500, f"Could not save voice candidate: {type(error).__name__}: {error}") from error
 
     info = sf.info(path)
     return {
