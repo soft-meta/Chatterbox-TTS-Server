@@ -71,7 +71,7 @@ class VoiceDesignRequest(BaseModel):
     sample_text: str = Field(..., min_length=4, max_length=900)
     seed: int = Field(2025, ge=0, le=2_147_483_647)
     candidate_count: int = Field(3, ge=1, le=4)
-    uniqueness_threshold: float = Field(0.78, ge=0.50, le=0.95)
+    uniqueness_threshold: float = Field(0.68, ge=0.50, le=0.95)
 
 
 class VoiceCandidateSaveRequest(BaseModel):

@@ -2,7 +2,7 @@
   'use strict';
 
   const MAX_TABS = 5;
-  const STORAGE_KEY = 'softMetaChatterboxTabsV5';
+  const STORAGE_KEY = 'softMetaChatterboxTabsV6';
   const THEME_KEY = 'softMetaChatterboxTheme';
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
@@ -185,7 +185,7 @@
     } catch (_) {
       localStorage.removeItem(STORAGE_KEY);
     }
-    state.tabs = [defaultTab(1), defaultTab(2)];
+    state.tabs = [defaultTab(1)];
     state.activeId = state.tabs[0].id;
   }
 
@@ -224,7 +224,7 @@
       });
       wrap.append(button);
 
-      if (tab.number > 2) {
+      if (tab.number > 1) {
         const remove = document.createElement('button');
         remove.className = 'remove-tab';
         remove.type = 'button';
@@ -284,9 +284,12 @@
         await api(`/api/jobs/${job.id}?delete_file=true`, { method: 'DELETE' });
         state.jobs.delete(job.id);
       }
+      const removedWasActive = state.activeId === tab.id;
       state.tabs = state.tabs.filter(item => item.id !== tab.id);
       state.tabs.forEach((item, index) => { item.number = index + 1; });
-      state.activeId = state.tabs[Math.max(0, state.tabs.length - 1)].id;
+      if (removedWasActive || !state.tabs.some(item => item.id === state.activeId)) {
+        state.activeId = state.tabs[Math.max(0, state.tabs.length - 1)].id;
+      }
       buildTabs();
       saveTabs();
       renderQueue();
@@ -448,14 +451,22 @@
       ? state.initial.predefined_voices
       : state.initial.reference_voices;
     select.disabled = false;
-    upload.classList.toggle('hidden', mode !== 'clone');
+    upload.classList.remove('hidden');
+    upload.title = mode === 'predefined' ? 'Import a reusable predefined voice' : 'Import a reference voice for cloning';
     preview.disabled = false;
     label.textContent = mode === 'predefined' ? 'Select Predefined Voice' : 'Reference Audio File';
 
     if (!list.length) {
       select.add(new Option(mode === 'clone' ? 'Upload a reference voice' : 'No predefined voices found', ''));
     } else {
-      list.forEach(item => select.add(new Option(item.filename, item.filename)));
+      list.forEach(item => {
+        const details = [
+          item.display_name || item.filename,
+          item.gender ? String(item.gender).replace(/^./, value => value.toUpperCase()) : '',
+          item.accent || '',
+        ].filter(Boolean).join(' · ');
+        select.add(new Option(details, item.filename));
+      });
     }
     if (tab.voice_filename && list.some(item => item.filename === tab.voice_filename)) {
       select.value = tab.voice_filename;
@@ -486,14 +497,14 @@
     localPlayer.src = localUrl;
     localPlayer.classList.remove('hidden');
     try {
-      const result = await api('/api/voices/upload?kind=clone', { method: 'POST', body: data });
+      const kind = tab.voice_mode === 'predefined' ? 'predefined' : 'clone';
+      const result = await api(`/api/voices/upload?kind=${kind}`, { method: 'POST', body: data });
       await refreshVoices(tab, true);
-      tab.voice_mode = 'clone';
       tab.voice_filename = result.filename;
       updateVoiceControls(tab);
       field(tab.panel, 'voice_filename').value = result.filename;
       saveTabs();
-      toast('Reference voice uploaded.', 'success');
+      toast(kind === 'predefined' ? 'Predefined voice imported.' : 'Reference voice uploaded.', 'success');
     } catch (error) {
       toast(error.message, 'error');
     }
@@ -547,12 +558,25 @@
     return { text: `${score}% different · unique`, className: 'unique' };
   }
 
-  function renderVoiceCandidates(tab) {
+  function renderVoiceCandidates(tab, force = false) {
     if (!tab?.panel) return;
     const container = tab.panel.querySelector('[data-role="voice-candidate-list"]');
     const candidates = Array.isArray(tab.generated_voice_candidates) ? tab.generated_voice_candidates : [];
+    const signature = JSON.stringify({
+      session: tab.generated_voice_session_id || '',
+      candidates: candidates.map(candidate => ({
+        filename: candidate.filename,
+        seed: candidate.seed,
+        difference: candidate.uniqueness?.difference_score ?? null,
+        status: candidate.uniqueness?.status ?? null,
+      })),
+    });
+
+    if (!force && container.dataset.renderSignature === signature) return;
+    container.dataset.renderSignature = signature;
     container.innerHTML = '';
     container.classList.toggle('hidden', !candidates.length);
+
     candidates.forEach(candidate => {
       const card = document.createElement('article');
       card.className = 'voice-candidate-card';
@@ -561,6 +585,10 @@
       const closest = candidate.uniqueness?.closest_voice
         ? `Closest saved voice: ${candidate.uniqueness.closest_voice}`
         : 'No close saved voice found';
+      const family = traits.voice_family ? `<span class="voice-family-chip">${safeText(traits.voice_family)}</span>` : '';
+      const tooSimilar = candidate.uniqueness?.status === 'too_similar';
+      const saveLabel = tooSimilar ? 'Too Similar — Regenerate' : 'Save and Use Voice';
+      const saveDisabled = tooSimilar ? 'disabled aria-disabled="true"' : '';
       card.innerHTML = `
         <div class="voice-candidate-head">
           <div>
@@ -569,15 +597,28 @@
           </div>
           <span class="voice-uniqueness ${label.className}">${label.text}</span>
         </div>
+        ${family}
         <p class="voice-candidate-traits">${safeText(traits.pitch || '')} · ${safeText(traits.texture || '')} · ${safeText(traits.personality || '')}</p>
         <p class="voice-candidate-closest">${safeText(closest)}</p>
-        <audio controls preload="metadata" src="${candidate.preview_url}"></audio>
+        <audio controls preload="auto" src="${candidate.preview_url}"></audio>
         <div class="voice-candidate-actions">
           <a class="button button-secondary" href="${candidate.download_url}" download>Download Sample</a>
-          <button class="button button-primary" type="button" data-save-candidate="${safeText(candidate.filename)}">Save and Use Voice</button>
+          <button class="button button-primary" type="button" data-save-candidate="${safeText(candidate.filename)}" ${saveDisabled}>${saveLabel}</button>
         </div>
       `;
-      card.querySelector('[data-save-candidate]').addEventListener('click', () => saveVoiceCandidate(tab, candidate));
+
+      const player = card.querySelector('audio');
+      player.addEventListener('play', () => {
+        $$('audio', container).forEach(other => {
+          if (other !== player && !other.paused) other.pause();
+        });
+        $$('.voice-candidate-card', container).forEach(item => item.classList.remove('is-playing'));
+        card.classList.add('is-playing');
+      });
+      player.addEventListener('pause', () => card.classList.remove('is-playing'));
+      player.addEventListener('ended', () => card.classList.remove('is-playing'));
+      const saveButton = card.querySelector('[data-save-candidate]');
+      if (!tooSimilar) saveButton.addEventListener('click', () => saveVoiceCandidate(tab, candidate));
       container.append(card);
     });
   }
@@ -658,12 +699,14 @@
           sample_text: tab.generated_voice_text,
           seed: Number(tab.generated_voice_seed || 2025),
           candidate_count: Number(tab.generated_voice_candidate_count || 3),
-          uniqueness_threshold: 0.78,
+          uniqueness_threshold: 0.68,
         }),
       });
       tab.generated_voice_session_id = result.session_id;
       tab.generated_voice_candidates = result.candidates || [];
-      renderVoiceCandidates(tab);
+      tab.generated_voice_seed = (Number(tab.generated_voice_seed || 2025) + 1000003) % 2147483647;
+      field(tab.panel, 'generated_voice_seed').value = tab.generated_voice_seed;
+      renderVoiceCandidates(tab, true);
       saveTabs();
       const checked = tab.generated_voice_candidates.filter(item => item.uniqueness?.checked).length;
       status.textContent = `Created ${tab.generated_voice_candidates.length} candidates. ${checked ? `${checked} checked against saved voices.` : 'Listen and choose the most natural voice.'}`;
@@ -874,7 +917,7 @@
         body: JSON.stringify({ delete_files: true }),
       });
       state.jobs.clear();
-      state.tabs = [defaultTab(1), defaultTab(2)];
+      state.tabs = [defaultTab(1)];
       state.activeId = state.tabs[0].id;
       localStorage.removeItem(STORAGE_KEY);
       buildTabs();

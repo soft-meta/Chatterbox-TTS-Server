@@ -276,13 +276,17 @@ def generate_candidates(data: dict[str, Any]) -> dict[str, Any]:
             candidate_seed = (base_seed + index * 104_729) % 2_147_483_647
             set_seed(candidate_seed)
             profile = profiles[index]
+            # Vary sampling modestly across candidates while keeping speech stable.
+            temperatures = (0.82, 0.94, 1.02, 0.88)
+            top_ps = (0.90, 0.96, 0.98, 0.93)
             wavs, sample_rate = model.generate_voice_design(
                 text=sample_text,
                 language="English",
                 instruct=str(profile["effective_description"]),
                 do_sample=True,
-                temperature=0.9,
-                top_p=0.95,
+                temperature=temperatures[index % len(temperatures)],
+                top_p=top_ps[index % len(top_ps)],
+                repetition_penalty=1.08,
                 max_new_tokens=2048,
             )
             if not wavs:

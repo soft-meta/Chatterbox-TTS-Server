@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.6.0
+
+- Fixed Qwen candidate preview players being rebuilt and stopped by background queue polling
+- Added one-at-a-time candidate playback without refreshing the other preview players
+- Added stronger identity families, age-conditioned vocal character and varied Qwen sampling profiles
+- Tightened generated-voice similarity screening and blocked saving candidates marked too similar
+- Auto-advanced the variation seed after each generated batch
+- Changed the default workspace from Audio 1 + Audio 2 to Audio 1 only
+- Added removable minus controls to Audio 2 through Audio 5
+- Added a second API link labelled Chatterbox TTS API
+- Refined the interface with a professional header, visual hierarchy, spacing, form controls and candidate cards
+- Added five bundled user-provided predefined American male reference voices
+- Added predefined voice importing directly from the Predefined Voices tab
+- Updated server and UI version to 0.6.0
+
+
 ## v0.5.2
 
 - Pinned a complete official Qwen3-TTS VoiceDesign model revision

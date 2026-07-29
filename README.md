@@ -1,18 +1,31 @@
 # SoftMeta Chatterbox TTS Server
 
+## v0.6.0 professional workspace and voice diversity update
+
+- Keeps generated candidate preview players stable while the queue polls in the background.
+- Starts with Audio 1 only; every added Audio 2–5 tab has a removable minus control.
+- Adds a clearer professional workspace layout, stronger visual hierarchy and responsive spacing.
+- Adds a direct **Chatterbox TTS API** link under API Docs.
+- Bundles five user-provided predefined American male WAV references.
+- Expands Qwen3-TTS voice identity families, age-conditioned vocal character and sampling variation.
+- Uses a stricter similarity threshold and prevents saving candidates marked too similar.
+- Automatically advances the variation seed after each successful candidate batch.
+- Use `colab/SoftMeta_Chatterbox_TTS_Colab_v0.6.0.ipynb`.
+
+
 ## v0.5.2 model snapshot fix
 
 - Pins the complete official Qwen3-TTS VoiceDesign revision.
 - Uses a validated local model snapshot to avoid stale Hugging Face cache files.
 - Installs SoX for the isolated Qwen environment.
-- Use `colab/SoftMeta_Chatterbox_TTS_Colab_v0.5.2.ipynb`.
+- Use `colab/SoftMeta_Chatterbox_TTS_Colab_v0.6.0.ipynb`.
 
 
 ## v0.5.1 hotfix
 
 - Fixed the Qwen3-TTS Colab verification cell syntax error.
 - No engine, UI workflow, or voice-generation behaviour was changed.
-- Use `colab/SoftMeta_Chatterbox_TTS_Colab_v0.5.2.ipynb`.
+- Use `colab/SoftMeta_Chatterbox_TTS_Colab_v0.6.0.ipynb`.
 
 A professional, self-hosted speech studio maintained by **SoftMeta**. The server,
 queue, browser UI, waveform tools and audio editor are SoftMeta code. Chatterbox
@@ -60,7 +73,7 @@ model-generated approximations, so listen before saving.
 ```text
 soft-meta/chatterbox-v2@v0.2.1
         ↓
-soft-meta/Chatterbox-TTS-Server@v0.5.2
+soft-meta/Chatterbox-TTS-Server@v0.6.0
         ↓
 Google Colab L4, local Python or Docker
 ```
@@ -69,7 +82,7 @@ This project has no runtime dependency on Devnen repositories.
 
 ## Google Colab
 
-Open `colab/SoftMeta_Chatterbox_TTS_Colab_v0.5.2.ipynb`, select an L4 GPU and
+Open `colab/SoftMeta_Chatterbox_TTS_Colab_v0.6.0.ipynb`, select an L4 GPU and
 run all cells. The notebook creates two isolated environments:
 
 - Chatterbox main server environment

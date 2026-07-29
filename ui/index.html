@@ -5,19 +5,26 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f7f9fc">
   <title>SoftMeta Chatterbox TTS Server</title>
-  <link rel="stylesheet" href="/static/styles.css?v=0.5.2">
+  <link rel="stylesheet" href="/static/styles.css?v=0.6.0">
 </head>
 <body>
   <header class="app-header">
     <div class="header-inner">
       <div class="brand-row">
+        <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
         <div class="brand-copy">
-          <h1>SoftMeta Chatterbox TTS Server</h1>
-          <span id="model-badge" class="model-badge">Original</span>
+          <span class="brand-kicker">SoftMeta Audio Studio</span>
+          <div class="brand-title-row">
+            <h1>Chatterbox TTS Server</h1>
+            <span id="model-badge" class="model-badge">Original</span>
+          </div>
         </div>
       </div>
       <div class="header-actions">
-        <a class="api-link" href="/docs" target="_blank" rel="noopener">API Docs</a>
+        <div class="api-link-group">
+          <a class="api-link" href="/docs" target="_blank" rel="noopener">API Docs</a>
+          <a class="api-sub-link" href="/docs" target="_blank" rel="noopener">Chatterbox TTS API</a>
+        </div>
         <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle light and dark theme">
           <span class="theme-icon">☀</span>
         </button>
@@ -28,7 +35,8 @@
   <main class="main-shell">
     <section class="studio-card">
       <div class="studio-heading">
-        <div>
+        <div class="studio-heading-copy">
+          <span class="section-eyebrow">Speech workspace</span>
           <h2>Generate Speech</h2>
           <p>Create natural speech, clone a permitted voice, and queue up to five audio jobs.</p>
         </div>
@@ -65,7 +73,7 @@
   </main>
 
   <footer class="app-footer">
-    <span><a href="https://github.com/soft-meta/chatterbox-v2" target="_blank" rel="noopener">SoftMeta Chatterbox TTS</a> Server v0.5.2</span>
+    <span><a href="https://github.com/soft-meta/chatterbox-v2" target="_blank" rel="noopener">SoftMeta Chatterbox TTS</a> Server v0.6.0</span>
     <span>Powered by the official open-source Chatterbox engine</span>
   </footer>
 
@@ -144,7 +152,7 @@
             </div>
             <label data-role="voice-upload-button" class="button button-secondary upload-control">
               <input data-role="voice-upload" type="file" accept="audio/*" hidden>
-              Import
+              Import Voice
             </label>
             <button data-action="refresh-voices" class="button button-secondary" type="button">Refresh</button>
             <button data-action="preview-voice" class="button button-secondary" type="button">Preview Voice</button>
@@ -371,6 +379,6 @@
     </article>
   </template>
 
-  <script src="/static/app.js?v=0.5.2" defer></script>
+  <script src="/static/app.js?v=0.6.0" defer></script>
 </body>
 </html>

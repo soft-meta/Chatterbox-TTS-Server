@@ -11,4 +11,4 @@ def test_voice_request_defaults_to_us_english_male_age_50() -> None:
     assert request.language == "en-US"
     assert request.emotion == "warm"
     assert request.candidate_count == 3
-    assert request.uniqueness_threshold == 0.78
+    assert request.uniqueness_threshold == 0.68
