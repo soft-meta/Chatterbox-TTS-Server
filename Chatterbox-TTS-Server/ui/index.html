@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7f9fc">
+  <title>SoftMeta Chatterbox TTS Server</title>
+  <link rel="stylesheet" href="/static/styles.css?v=0.4.0">
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="brand-row">
+        <div class="brand-copy">
+          <h1>SoftMeta Chatterbox TTS Server</h1>
+          <span id="model-badge" class="model-badge">Original</span>
+        </div>
+      </div>
+      <div class="header-actions">
+        <a class="api-link" href="/docs" target="_blank" rel="noopener">API Docs</a>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle light and dark theme">
+          <span class="theme-icon">☀</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="main-shell">
+    <section class="studio-card">
+      <div class="studio-heading">
+        <div>
+          <h2>Generate Speech</h2>
+          <p>Create natural speech, clone a permitted voice, and queue up to five audio jobs.</p>
+        </div>
+        <div class="studio-actions">
+          <button id="generate-all" class="button button-primary" type="button">Generate All</button>
+          <button id="remove-all" class="button button-danger-soft" type="button" title="Clear completed jobs, titles, scripts and generated audio">Remove All</button>
+          <button id="open-monitor" class="button button-secondary" type="button">Audio Queue Monitor</button>
+        </div>
+      </div>
+
+      <section class="active-model-panel" aria-labelledby="active-model-label">
+        <label id="active-model-label" for="active-model">Active Model</label>
+        <select id="active-model" aria-label="Active model"></select>
+        <div id="model-state" class="model-state" data-state="loading">
+          <span id="model-dot" class="model-dot"></span>
+          <span id="model-status">Checking model...</span>
+        </div>
+        <button id="load-model" class="button button-model" type="button">Load Model</button>
+      </section>
+
+      <nav id="audio-tabs" class="audio-tabs" aria-label="Audio workspaces"></nav>
+      <div id="audio-panels" class="audio-panels"></div>
+    </section>
+
+    <section id="tips-card" class="tips-card">
+      <h2>Tips &amp; Tricks</h2>
+      <ul>
+        <li>For long scripts, keep <strong>Split text into chunks</strong> enabled.</li>
+        <li>Use a clean 10–20 second single-speaker reference for voice cloning.</li>
+        <li>For a natural American delivery, use an American-accent reference recording.</li>
+        <li>Audio jobs run one at a time so the GPU remains stable.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <span><a href="https://github.com/soft-meta/chatterbox-v2" target="_blank" rel="noopener">SoftMeta Chatterbox TTS</a> Server v0.4.0</span>
+    <span>Powered by the official open-source Chatterbox engine</span>
+  </footer>
+
+  <div id="progress-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="monitor-title">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div>
+          <h2 id="monitor-title">Audio Queue Monitor</h2>
+          <p>Prepared jobs generate automatically in order.</p>
+        </div>
+        <div class="modal-header-actions">
+          <button id="minimise-monitor" class="button button-secondary" type="button">Minimise</button>
+          <button id="close-monitor" class="icon-close" type="button" aria-label="Close monitor">×</button>
+        </div>
+      </div>
+      <div id="queue-list" class="queue-list"></div>
+      <div id="monitor-preview-box" class="monitor-preview-box hidden">
+        <div class="monitor-preview-title">Completed audio preview</div>
+        <audio id="monitor-player" controls preload="metadata"></audio>
+      </div>
+    </div>
+  </div>
+
+  <button id="floating-progress" class="floating-progress hidden" type="button" aria-label="Open audio queue monitor"></button>
+  <div id="toast-root" class="toast-root" aria-live="polite"></div>
+
+  <template id="audio-panel-template">
+    <article class="audio-panel">
+      <div class="panel-top-row">
+        <div class="field title-field">
+          <label>Video Title</label>
+          <input data-field="title" type="text" maxlength="180" placeholder="Enter a title for filenames and identification">
+        </div>
+        <div class="audio-number-chip"></div>
+      </div>
+
+      <div class="field text-field">
+        <div class="label-row">
+          <div>
+            <label>Text to synthesise</label>
+            <p>Enter the text you want to convert to speech.</p>
+          </div>
+          <span data-role="word-count">0 words</span>
+        </div>
+        <textarea data-field="text" rows="13" placeholder="Paste your script here..."></textarea>
+      </div>
+
+      <div class="generate-row">
+        <button data-action="generate" class="button button-primary generate-button" type="button">
+          <span class="speaker-icon">◖</span>
+          <span data-role="generate-label">Generate Audio</span>
+        </button>
+        <label class="inline-check">
+          <input data-field="split_text" type="checkbox">
+          <span>Split text into chunks</span>
+        </label>
+        <div class="chunk-control">
+          <span>Chunk size</span>
+          <input data-field="chunk_words" type="range" min="25" max="250" step="5">
+          <strong data-role="chunk-value">90</strong>
+        </div>
+      </div>
+
+      <div class="voice-mode-tabs" role="tablist" aria-label="Voice mode">
+        <button data-voice-mode="predefined" type="button">Predefined Voices</button>
+        <button data-voice-mode="clone" type="button">Voice Cloning (Reference)</button>
+        <button data-voice-mode="generated" type="button">Generate Voice</button>
+      </div>
+
+      <section class="voice-section">
+        <div data-role="standard-voice-tools">
+          <div class="voice-grid">
+            <div class="field grow">
+              <label data-role="voice-label">Select Voice</label>
+              <select data-field="voice_filename"></select>
+            </div>
+            <label data-role="voice-upload-button" class="button button-secondary upload-control">
+              <input data-role="voice-upload" type="file" accept="audio/*" hidden>
+              Import
+            </label>
+            <button data-action="refresh-voices" class="button button-secondary" type="button">Refresh</button>
+            <button data-action="preview-voice" class="button button-secondary" type="button">Preview Voice</button>
+          </div>
+          <audio data-role="voice-player" class="voice-player hidden" controls preload="metadata"></audio>
+          <p class="voice-help">Use only voices you own or have permission to clone. Clean speech with no music or echo produces the best result.</p>
+        </div>
+
+        <div data-role="voice-designer" class="voice-designer hidden">
+          <div class="voice-designer-intro">
+            <h3>Generate a Natural Human Voice Reference</h3>
+            <p>Choose the speaker age and gender. SoftMeta automatically builds an age-aware US English voice formula, generates a reusable reference WAV, and selects it for Chatterbox cloning.</p>
+          </div>
+
+          <div class="voice-profile-grid">
+            <label class="field">
+              <span>Voice Name</span>
+              <input data-field="generated_voice_name" type="text" maxlength="80" placeholder="American Male 70 Warm">
+            </label>
+            <label class="field">
+              <span>Speaker Age</span>
+              <input data-field="generated_voice_age" type="number" min="18" max="110" value="50">
+            </label>
+            <label class="field">
+              <span>Gender</span>
+              <select data-field="generated_voice_gender">
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Language and Accent</span>
+              <select data-field="generated_voice_language">
+                <option value="en-US">US English (American accent)</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Main Emotion</span>
+              <select data-field="generated_voice_emotion">
+                <option value="warm">Warm and sincere</option>
+                <option value="calm">Calm and steady</option>
+                <option value="reflective">Reflective and thoughtful</option>
+                <option value="concerned">Concerned and careful</option>
+                <option value="serious">Serious and grounded</option>
+                <option value="hopeful">Gentle and hopeful</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Voice Variation Seed</span>
+              <input data-field="generated_voice_seed" type="number" min="0" max="2147483647" value="2025">
+            </label>
+          </div>
+
+          <div class="age-profile-card">
+            <div>
+              <strong data-role="age-profile-title">Age 50 profile</strong>
+              <span data-role="age-profile-summary">Slightly slower, thoughtful and grounded.</span>
+            </div>
+            <div class="age-speed-badge">
+              <span>Recommended final speed</span>
+              <strong data-role="age-speed-value">0.96×</strong>
+            </div>
+          </div>
+
+          <label class="field voice-description-field">
+            <span>Additional Voice Notes</span>
+            <textarea data-field="generated_voice_description" rows="4" placeholder="Optional: warm, confident, medium-low pitch, private one-to-one conversation, subtle emotion. Age behaviour and American accent are applied automatically."></textarea>
+          </label>
+          <label class="field voice-sample-field">
+            <span>Voiceover Sample Text</span>
+            <textarea data-field="generated_voice_text" rows="3" placeholder="Today, I want to share a simple lesson that can make life feel calmer and more meaningful."></textarea>
+          </label>
+
+          <details class="voice-formula-details">
+            <summary>Natural Human Voice Formula</summary>
+            <p data-role="voice-formula-preview"></p>
+          </details>
+
+          <div class="generated-voice-library">
+            <label class="field grow">
+              <span>Saved Generated Voices</span>
+              <select data-field="generated_voice_filename"></select>
+            </label>
+            <button data-action="preview-generated-voice" class="button button-secondary" type="button">Preview</button>
+            <a data-role="download-generated-voice" class="button button-secondary disabled" href="#" download>Download</a>
+          </div>
+          <div class="voice-designer-actions">
+            <button data-action="generate-voice" class="button button-primary" type="button">Generate Voice</button>
+            <span data-role="voice-designer-status" class="voice-designer-status">The first use downloads the Parler-TTS voice-design model.</span>
+          </div>
+          <audio data-role="generated-voice-player" class="voice-player hidden" controls preload="metadata"></audio>
+          <p class="voice-help">SoftMeta strongly guides age, gender, pace and US English delivery, but text-described age and accent remain approximate. Try another seed when you want a different voice identity.</p>
+        </div>
+      </section>
+
+      <section class="preset-section">
+        <div class="section-label">Load Example Preset</div>
+        <div data-role="preset-buttons" class="preset-buttons"></div>
+        <select data-field="preset" class="visually-hidden" aria-label="Generation preset"></select>
+      </section>
+
+      <details class="parameters-panel" open>
+        <summary>Generation Parameters</summary>
+        <div class="parameter-grid">
+          <label class="slider-field">
+            <span><b>Temperature</b><output data-output="temperature"></output></span>
+            <input data-field="temperature" type="range" min="0.05" max="2" step="0.05">
+          </label>
+          <label class="slider-field">
+            <span><b>Exaggeration</b><output data-output="exaggeration"></output></span>
+            <input data-field="exaggeration" type="range" min="0" max="2" step="0.05">
+          </label>
+          <label class="slider-field">
+            <span><b>CFG Weight</b><output data-output="cfg_weight"></output></span>
+            <input data-field="cfg_weight" type="range" min="0" max="1" step="0.05">
+          </label>
+          <label class="slider-field">
+            <span><b>Speed Factor</b><output data-output="speed_factor"></output></span>
+            <input data-field="speed_factor" type="range" min="0.5" max="2" step="0.05">
+          </label>
+        </div>
+        <div class="parameter-bottom-grid">
+          <label class="field">
+            <span>Generation Seed</span>
+            <input data-field="seed" type="number" min="0" max="2147483647">
+          </label>
+          <label class="field">
+            <span>Language</span>
+            <select data-field="language">
+              <option value="en">US English</option>
+              <option value="es">Spanish</option>
+              <option value="fr">French</option>
+              <option value="de">German</option>
+              <option value="it">Italian</option>
+              <option value="pt">Portuguese</option>
+              <option value="hi">Hindi</option>
+              <option value="ja">Japanese</option>
+              <option value="ko">Korean</option>
+              <option value="zh">Chinese</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Output Format</span>
+            <select data-field="output_format">
+              <option value="wav">WAV</option>
+            </select>
+          </label>
+        </div>
+      </details>
+
+      <section data-role="generated" class="generated-card hidden">
+        <div class="generated-header">
+          <div>
+            <h3>Generated Audio</h3>
+            <p data-role="generated-title"></p>
+          </div>
+          <a data-role="download-original" class="button button-secondary" download>Download WAV</a>
+        </div>
+
+        <div data-role="wave-status" class="wave-status">Preparing waveform...</div>
+        <div class="wave-toolbar">
+          <button data-action="zoom-out" class="button button-small" type="button">Zoom Out</button>
+          <button data-action="fit-wave" class="button button-small" type="button">Fit All</button>
+          <button data-action="pan-wave" class="button button-small" type="button">Move Left / Right</button>
+          <button data-action="zoom-in" class="button button-small" type="button">Zoom In</button>
+          <button data-action="set-start-mode" class="button button-small" type="button">Click Sets Start</button>
+          <button data-action="set-end-mode" class="button button-small active" type="button">Click Sets End</button>
+        </div>
+        <div data-role="wave-scroll" class="wave-scroll">
+          <canvas data-role="wave-canvas" height="176"></canvas>
+          <div data-role="wave-tooltip" class="wave-tooltip hidden"></div>
+        </div>
+        <div class="time-readout">
+          <span>Mouse time <strong data-role="mouse-time">0:00.0</strong></span>
+          <span>Selected time <strong data-role="selected-time">0:00.0</strong></span>
+        </div>
+
+        <audio data-role="main-player" class="hidden-audio-engine" preload="metadata"></audio>
+        <div class="wave-player-controls">
+          <button data-action="toggle-playback" class="button button-primary playback-button" type="button">Play</button>
+          <span data-role="playback-time" class="playback-time">0:00 / 0:00</span>
+          <input data-role="playback-progress" class="playback-progress" type="range" min="0" max="1000" value="0" aria-label="Audio playback position">
+        </div>
+        <div data-role="generation-meta" class="generation-meta"></div>
+
+        <div class="cutter-panel">
+          <h3>Cut Generated Audio</h3>
+          <p>Choose any start and end time. Your original generated audio remains unchanged.</p>
+          <div class="cut-time-grid">
+            <label class="field"><span>Start time</span><input data-field="cut_start" type="text" value="0:00" placeholder="0:00"></label>
+            <label class="field"><span>End time</span><input data-field="cut_end" type="text" value="" placeholder="5:00"></label>
+          </div>
+          <button data-action="use-end-start" class="button button-secondary continue-button" type="button">Use Current End as Next Start</button>
+          <div class="cut-summary">
+            <span data-role="selected-duration">Selected: calculating...</span>
+            <span data-role="removed-duration">Removed: calculating...</span>
+          </div>
+          <div class="cut-actions">
+            <button data-action="preview-selected" class="button button-secondary" type="button">Preview Selected</button>
+            <button data-action="download-selected" class="button button-primary" type="button">Download Selected WAV</button>
+          </div>
+          <div class="split-box">
+            <h4>Split into Two Separate Audio Files</h4>
+            <p>Part One keeps everything before the selected End time. Part Two keeps everything after it.</p>
+            <div class="split-actions">
+              <button data-action="download-part-one" class="button button-secondary" type="button">Download Part 1</button>
+              <button data-action="download-part-two" class="button button-primary" type="button">Download Part 2</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </article>
+  </template>
+
+  <script src="/static/app.js?v=0.4.0" defer></script>
+</body>
+</html>
