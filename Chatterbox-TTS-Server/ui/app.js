@@ -2,7 +2,7 @@
   'use strict';
 
   const MAX_TABS = 5;
-  const STORAGE_KEY = 'softMetaChatterboxTabsV4';
+  const STORAGE_KEY = 'softMetaChatterboxTabsV7';
   const THEME_KEY = 'softMetaChatterboxTheme';
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
@@ -41,7 +41,10 @@
       generated_voice_description: 'Warm, confident, natural, intimate, and emotionally subtle.',
       generated_voice_text: 'Today, I want to share a simple lesson that can make life feel calmer and more meaningful.',
       generated_voice_seed: 2025,
+      generated_voice_candidate_count: 3,
       generated_voice_filename: '',
+      generated_voice_candidates: [],
+      generated_voice_session_id: '',
       temperature: defaults.temperature ?? 0.8,
       exaggeration: defaults.exaggeration ?? 0.65,
       cfg_weight: defaults.cfg_weight ?? 0.35,
@@ -129,13 +132,13 @@
 
   function generatedAgeProfile(ageValue) {
     const age = Math.max(18, Math.min(110, Number(ageValue) || 50));
-    if (age < 40) return { label: 'Adult', pace: 'Natural conversational pace with steady energy.', speed: 1.00 };
-    if (age < 50) return { label: 'Mature adult', pace: 'Normal, unhurried pace with mature confidence.', speed: 1.00 };
-    if (age < 60) return { label: 'Mature and experienced', pace: 'Slightly slower, thoughtful and grounded.', speed: 0.96 };
-    if (age < 70) return { label: 'Older and experienced', pace: 'Slow and clear with gentle pauses and warm vocal weight.', speed: 0.90 };
-    if (age < 80) return { label: 'Elderly but mentally clear', pace: 'Noticeably slow, considered and emotionally deep.', speed: 0.84 };
-    if (age < 90) return { label: 'Very elderly and thoughtful', pace: 'Very slow and careful with soft power and clear pauses.', speed: 0.76 };
-    return { label: 'Very elderly and fragile but present', pace: 'Very slow, careful and understandable with long natural pauses.', speed: 0.68 };
+    if (age < 40) return { label: 'Adult', pace: 'Natural conversational pace with varied thought groups and short pauses.', speed: 1.00 };
+    if (age < 50) return { label: 'Mature adult', pace: 'Unhurried, mature delivery with natural breathing.', speed: 1.00 };
+    if (age < 60) return { label: 'Mature and experienced', pace: 'Thoughtful delivery with small pauses before meaningful ideas.', speed: 1.00 };
+    if (age < 70) return { label: 'Older and experienced', pace: 'Clear, grounded delivery using shorter thought groups and gentle pauses.', speed: 1.00 };
+    if (age < 80) return { label: 'Elderly but mentally clear', pace: 'Measured delivery using short thought groups, variable pauses and natural breaths.', speed: 1.00 };
+    if (age < 90) return { label: 'Very elderly and thoughtful', pace: 'Careful, spacious delivery with softer projection and clear natural pauses.', speed: 1.00 };
+    return { label: 'Very elderly and mentally present', pace: 'Very careful, spacious delivery with low physical energy and meaningful pauses.', speed: 1.00 };
   }
 
   function updateVoiceProfilePreview(tab) {
@@ -154,12 +157,12 @@
     if (summary) summary.textContent = profile.pace;
     if (speed) speed.textContent = `${profile.speed.toFixed(2)}×`;
     if (formula) {
-      formula.textContent = `A ${Math.round(age)}-year-old American ${genderText} speaking in US English with a natural General American accent. ${profile.pace} The delivery is ${emotion}, intimate and one-to-one, with subtle variation in timing, pitch, breath, energy and emphasis. Avoid narrator, announcer, customer-service and synthetic AI rhythms.`;
+      formula.textContent = `Create one completely original fictional American ${genderText}. Speaker identity comes first: use a genuinely different perceived vocal anatomy, resonance, texture, articulation, sentence melody and personality. Do not reuse the same default person with only a different pitch, age performance or emotional tune. Then make the speaker ${Math.round(age)} years old through natural vocal texture, projection, breathing and thought grouping. ${profile.pace} Do not stretch words or globally slow the recording. Use General American English, intimate one-to-one delivery and naturally imperfect human timing. Avoid narrator, announcer, customer-service and synthetic AI rhythms.`;
     }
   }
 
   function saveTabs() {
-    const tabs = state.tabs.map(({ panel, waveform, ...tab }) => tab);
+    const tabs = state.tabs.map(({ panel, waveform, generated_voice_candidates, generated_voice_session_id, ...tab }) => tab);
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ tabs, activeId: state.activeId }));
   }
 
@@ -182,7 +185,7 @@
     } catch (_) {
       localStorage.removeItem(STORAGE_KEY);
     }
-    state.tabs = [defaultTab(1), defaultTab(2)];
+    state.tabs = [defaultTab(1)];
     state.activeId = state.tabs[0].id;
   }
 
@@ -221,7 +224,7 @@
       });
       wrap.append(button);
 
-      if (tab.number > 2) {
+      if (tab.number > 1) {
         const remove = document.createElement('button');
         remove.className = 'remove-tab';
         remove.type = 'button';
@@ -281,9 +284,12 @@
         await api(`/api/jobs/${job.id}?delete_file=true`, { method: 'DELETE' });
         state.jobs.delete(job.id);
       }
+      const removedWasActive = state.activeId === tab.id;
       state.tabs = state.tabs.filter(item => item.id !== tab.id);
       state.tabs.forEach((item, index) => { item.number = index + 1; });
-      state.activeId = state.tabs[Math.max(0, state.tabs.length - 1)].id;
+      if (removedWasActive || !state.tabs.some(item => item.id === state.activeId)) {
+        state.activeId = state.tabs[Math.max(0, state.tabs.length - 1)].id;
+      }
       buildTabs();
       saveTabs();
       renderQueue();
@@ -317,7 +323,7 @@
   function fillPanel(tab) {
     const panel = tab.panel;
     const stringFields = ['title', 'text', 'preset', 'language', 'voice_filename', 'generated_voice_name', 'generated_voice_gender', 'generated_voice_language', 'generated_voice_emotion', 'generated_voice_description', 'generated_voice_text', 'generated_voice_filename', 'output_format', 'cut_start', 'cut_end'];
-    const numberFields = ['temperature', 'exaggeration', 'cfg_weight', 'speed_factor', 'seed', 'chunk_words', 'generated_voice_age', 'generated_voice_seed'];
+    const numberFields = ['temperature', 'exaggeration', 'cfg_weight', 'speed_factor', 'seed', 'chunk_words', 'generated_voice_age', 'generated_voice_seed', 'generated_voice_candidate_count'];
     stringFields.forEach(name => {
       const element = field(panel, name);
       if (element && tab[name] !== undefined) element.value = tab[name];
@@ -334,6 +340,7 @@
     ['temperature', 'exaggeration', 'cfg_weight', 'speed_factor'].forEach(name => updateSliderOutput(panel, name));
     updateVoiceControls(tab);
     updateVoiceProfilePreview(tab);
+    renderVoiceCandidates(tab);
     updatePresetChips(tab);
     const job = tab.job_id ? state.jobs.get(tab.job_id) : null;
     if (job?.status === 'completed') showGenerated(tab, job);
@@ -346,7 +353,7 @@
       const element = field(panel, name);
       if (element) tab[name] = element.value;
     });
-    ['temperature', 'exaggeration', 'cfg_weight', 'speed_factor', 'seed', 'chunk_words', 'generated_voice_age', 'generated_voice_seed'].forEach(name => {
+    ['temperature', 'exaggeration', 'cfg_weight', 'speed_factor', 'seed', 'chunk_words', 'generated_voice_age', 'generated_voice_seed', 'generated_voice_candidate_count'].forEach(name => {
       const element = field(panel, name);
       if (element) tab[name] = Number(element.value);
     });
@@ -417,7 +424,10 @@
     if (!generatedList.length) {
       generatedSelect.add(new Option('Generate your first voice', ''));
     } else {
-      generatedList.forEach(item => generatedSelect.add(new Option(item.filename, item.filename)));
+      generatedList.forEach(item => {
+        const details = [item.display_name || item.filename, item.age ? `Age ${item.age}` : '', item.gender || ''].filter(Boolean).join(' · ');
+        generatedSelect.add(new Option(details, item.filename));
+      });
     }
     if (tab.generated_voice_filename && generatedList.some(item => item.filename === tab.generated_voice_filename)) {
       generatedSelect.value = tab.generated_voice_filename;
@@ -441,14 +451,22 @@
       ? state.initial.predefined_voices
       : state.initial.reference_voices;
     select.disabled = false;
-    upload.classList.toggle('hidden', mode !== 'clone');
+    upload.classList.remove('hidden');
+    upload.title = mode === 'predefined' ? 'Import a reusable predefined voice' : 'Import a reference voice for cloning';
     preview.disabled = false;
     label.textContent = mode === 'predefined' ? 'Select Predefined Voice' : 'Reference Audio File';
 
     if (!list.length) {
       select.add(new Option(mode === 'clone' ? 'Upload a reference voice' : 'No predefined voices found', ''));
     } else {
-      list.forEach(item => select.add(new Option(item.filename, item.filename)));
+      list.forEach(item => {
+        const details = [
+          item.display_name || item.filename,
+          item.gender ? String(item.gender).replace(/^./, value => value.toUpperCase()) : '',
+          item.accent || '',
+        ].filter(Boolean).join(' · ');
+        select.add(new Option(details, item.filename));
+      });
     }
     if (tab.voice_filename && list.some(item => item.filename === tab.voice_filename)) {
       select.value = tab.voice_filename;
@@ -479,14 +497,14 @@
     localPlayer.src = localUrl;
     localPlayer.classList.remove('hidden');
     try {
-      const result = await api('/api/voices/upload?kind=clone', { method: 'POST', body: data });
+      const kind = tab.voice_mode === 'predefined' ? 'predefined' : 'clone';
+      const result = await api(`/api/voices/upload?kind=${kind}`, { method: 'POST', body: data });
       await refreshVoices(tab, true);
-      tab.voice_mode = 'clone';
       tab.voice_filename = result.filename;
       updateVoiceControls(tab);
       field(tab.panel, 'voice_filename').value = result.filename;
       saveTabs();
-      toast('Reference voice uploaded.', 'success');
+      toast(kind === 'predefined' ? 'Predefined voice imported.' : 'Reference voice uploaded.', 'success');
     } catch (error) {
       toast(error.message, 'error');
     }
@@ -531,6 +549,132 @@
     player.play().catch(() => toast('The browser could not play this generated voice.', 'error'));
   }
 
+  function uniquenessLabel(candidate) {
+    const uniqueness = candidate?.uniqueness || {};
+    if (!uniqueness.checked) return { text: 'Speaker comparison unavailable', className: 'not-checked' };
+    if (uniqueness.status === 'baseline') return { text: 'Baseline candidate', className: 'baseline' };
+    const similarity = Number(uniqueness.similarity_percent ?? 0).toFixed(1);
+    if (uniqueness.status === 'too_similar') return { text: `${similarity}% similar · rejected`, className: 'too-similar' };
+    if (uniqueness.status === 'review') return { text: `${similarity}% similar · review`, className: 'review' };
+    return { text: `${similarity}% similar · unique`, className: 'unique' };
+  }
+
+
+  function renderVoiceCandidates(tab, force = false) {
+    if (!tab?.panel) return;
+    const container = tab.panel.querySelector('[data-role="voice-candidate-list"]');
+    const candidates = Array.isArray(tab.generated_voice_candidates) ? tab.generated_voice_candidates : [];
+    const signature = JSON.stringify({
+      session: tab.generated_voice_session_id || '',
+      candidates: candidates.map(candidate => ({
+        filename: candidate.filename,
+        seed: candidate.seed,
+        difference: candidate.uniqueness?.difference_score ?? null,
+        status: candidate.uniqueness?.status ?? null,
+      })),
+    });
+
+    if (!force && container.dataset.renderSignature === signature) return;
+    container.dataset.renderSignature = signature;
+    container.innerHTML = '';
+    container.classList.toggle('hidden', !candidates.length);
+
+    candidates.forEach(candidate => {
+      const card = document.createElement('article');
+      card.className = 'voice-candidate-card';
+      const label = uniquenessLabel(candidate);
+      const traits = candidate.identity_traits || {};
+      const closest = candidate.uniqueness?.closest_voice
+        ? `Closest comparison: ${candidate.uniqueness.closest_voice}`
+        : candidate.uniqueness?.status === 'baseline'
+          ? 'First comparison baseline'
+          : 'No close comparison found';
+      const compared = Number(candidate.uniqueness?.reference_count || 0);
+      const family = traits.voice_family ? `<span class="voice-family-chip">${safeText(traits.voice_family)}</span>` : '';
+      const tooSimilar = candidate.uniqueness?.status === 'too_similar';
+      const needsReview = candidate.uniqueness?.status === 'review';
+      const saveLabel = tooSimilar ? 'Rejected — Generate Again' : needsReview ? 'Review and Save Voice' : 'Save and Use Voice';
+      const saveDisabled = tooSimilar ? 'disabled aria-disabled="true"' : '';
+      card.innerHTML = `
+        <div class="voice-candidate-head">
+          <div>
+            <strong>Candidate ${Number(candidate.candidate_number || 0)}</strong>
+            <span>Seed ${Number(candidate.seed || 0)} · ${safeText(candidate.age_label || '')}</span>
+          </div>
+          <span class="voice-uniqueness ${label.className}">${label.text}</span>
+        </div>
+        ${family}
+        <p class="voice-candidate-code">${safeText(candidate.identity_code || '')}</p>
+        <p class="voice-candidate-traits">${safeText(traits.pitch || '')} · ${safeText(traits.vocal_anatomy || '')} · ${safeText(traits.spectral_colour || '')}</p>
+        <p class="voice-candidate-traits">${safeText(traits.texture || '')} · ${safeText(traits.personality || '')} · ${safeText(traits.speaking_habit || '')}</p>
+        <p class="voice-candidate-closest">${safeText(closest)}${compared ? ` · compared with ${compared} voice${compared === 1 ? '' : 's'}` : ''}</p>
+        <audio controls preload="auto" src="${candidate.preview_url}"></audio>
+        <div class="voice-candidate-actions">
+          <a class="button button-secondary" href="${candidate.download_url}" download>Download Sample</a>
+          <button class="button button-primary" type="button" data-save-candidate="${safeText(candidate.filename)}" ${saveDisabled}>${saveLabel}</button>
+        </div>
+      `;
+
+      const player = card.querySelector('audio');
+      player.addEventListener('play', () => {
+        $$('audio', container).forEach(other => {
+          if (other !== player && !other.paused) other.pause();
+        });
+        $$('.voice-candidate-card', container).forEach(item => item.classList.remove('is-playing'));
+        card.classList.add('is-playing');
+      });
+      player.addEventListener('pause', () => card.classList.remove('is-playing'));
+      player.addEventListener('ended', () => card.classList.remove('is-playing'));
+      const saveButton = card.querySelector('[data-save-candidate]');
+      if (!tooSimilar) saveButton.addEventListener('click', () => {
+        if (needsReview && !confirm('This candidate is closer to another saved or batch voice than recommended. Save it anyway?')) return;
+        saveVoiceCandidate(tab, candidate);
+      });
+      container.append(card);
+    });
+  }
+
+  async function saveVoiceCandidate(tab, candidate) {
+    const button = tab.panel.querySelector(`[data-save-candidate="${CSS.escape(candidate.filename)}"]`);
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Saving...';
+    }
+    try {
+      const suffix = Number(candidate.candidate_number || 1);
+      const voiceName = `${tab.generated_voice_name.trim()} ${suffix}`.trim();
+      const result = await api('/api/voice-designer/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: tab.generated_voice_session_id,
+          filename: candidate.filename,
+          voice_name: voiceName,
+        }),
+      });
+      await refreshVoices(tab, true);
+      tab.voice_mode = 'generated';
+      tab.generated_voice_filename = result.filename;
+      tab.voice_filename = result.filename;
+      tab.speed_factor = 1.0;
+      updateVoiceControls(tab);
+      field(tab.panel, 'generated_voice_filename').value = result.filename;
+      field(tab.panel, 'speed_factor').value = '1';
+      updateSliderOutput(tab.panel, 'speed_factor');
+      updateGeneratedVoiceDownload(tab);
+      saveTabs();
+      previewGeneratedVoice(tab);
+      toast('Voice saved and selected for audio generation.', 'success');
+    } catch (error) {
+      toast(error.message, 'error');
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = 'Save and Use Voice';
+      }
+    }
+  }
+
   async function generateDesignedVoice(tab) {
     captureTab(tab);
     if (!tab.generated_voice_name.trim()) {
@@ -543,15 +687,15 @@
     }
     const activeJobs = [...state.jobs.values()].some(job => ['queued', 'running'].includes(job.status));
     if (activeJobs) {
-      toast('Wait for the audio queue to finish before generating a new voice.', 'error');
+      toast('Wait for the audio queue to finish before generating new voices.', 'error');
       return;
     }
 
     const button = tab.panel.querySelector('[data-action="generate-voice"]');
     const status = tab.panel.querySelector('[data-role="voice-designer-status"]');
     button.disabled = true;
-    button.textContent = 'Generating Voice...';
-    status.textContent = 'Loading the voice-design model and creating a reference sample. This can take several minutes the first time.';
+    button.textContent = 'Generating Candidates...';
+    status.textContent = 'Building identity-first Qwen3-TTS speakers, over-generating candidates and rejecting repeated identities. This can take longer because up to 12 attempts may be checked.';
     try {
       const result = await api('/api/voice-designer/generate', {
         method: 'POST',
@@ -565,28 +709,25 @@
           description: tab.generated_voice_description,
           sample_text: tab.generated_voice_text,
           seed: Number(tab.generated_voice_seed || 2025),
+          candidate_count: Number(tab.generated_voice_candidate_count || 3),
+          uniqueness_threshold: 0.72,
         }),
       });
-      await refreshVoices(tab, true);
-      tab.voice_mode = 'generated';
-      tab.generated_voice_filename = result.filename;
-      tab.voice_filename = result.filename;
-      tab.speed_factor = Number(result.recommended_speed_factor || tab.speed_factor || 1);
-      updateVoiceControls(tab);
-      field(tab.panel, 'generated_voice_filename').value = result.filename;
-      field(tab.panel, 'speed_factor').value = tab.speed_factor;
-      updateSliderOutput(tab.panel, 'speed_factor');
-      updateGeneratedVoiceDownload(tab);
+      tab.generated_voice_session_id = result.session_id;
+      tab.generated_voice_candidates = result.candidates || [];
+      tab.generated_voice_seed = (Number(tab.generated_voice_seed || 2025) + 1000003) % 2147483647;
+      field(tab.panel, 'generated_voice_seed').value = tab.generated_voice_seed;
+      renderVoiceCandidates(tab, true);
       saveTabs();
-      status.textContent = `Created ${result.filename} • ${formatTime(result.duration, true)} • Age ${result.age} ${result.gender} • ${result.pace_label}. Final audio speed set to ${tab.speed_factor.toFixed(2)}×.`;
-      previewGeneratedVoice(tab);
-      toast('Generated voice created and selected.', 'success');
+      const checked = tab.generated_voice_candidates.filter(item => item.uniqueness?.checked).length;
+      status.textContent = `Selected ${tab.generated_voice_candidates.length} voice${tab.generated_voice_candidates.length === 1 ? '' : 's'} from ${Number(result.attempted_count || tab.generated_voice_candidates.length)} attempt${Number(result.attempted_count || 0) === 1 ? '' : 's'}. ${Number(result.rejected_count || 0)} repeated voice identit${Number(result.rejected_count || 0) === 1 ? 'y was' : 'ies were'} rejected.${result.search_exhausted ? ' The strict search returned fewer voices than requested.' : ''}`;
+      toast('Voice candidates are ready to preview.', 'success');
     } catch (error) {
       status.textContent = error.message;
       toast(error.message, 'error');
     } finally {
       button.disabled = false;
-      button.textContent = 'Generate Voice';
+      button.textContent = 'Generate Candidates';
     }
   }
 
@@ -787,7 +928,7 @@
         body: JSON.stringify({ delete_files: true }),
       });
       state.jobs.clear();
-      state.tabs = [defaultTab(1), defaultTab(2)];
+      state.tabs = [defaultTab(1)];
       state.activeId = state.tabs[0].id;
       localStorage.removeItem(STORAGE_KEY);
       buildTabs();

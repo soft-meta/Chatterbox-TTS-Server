@@ -67,9 +67,17 @@ class VoiceDesignRequest(BaseModel):
         "serious",
         "hopeful",
     ] = "warm"
-    description: str = Field("", max_length=1200)
-    sample_text: str = Field(..., min_length=4, max_length=800)
+    description: str = Field("", max_length=1600)
+    sample_text: str = Field(..., min_length=4, max_length=900)
     seed: int = Field(2025, ge=0, le=2_147_483_647)
+    candidate_count: int = Field(3, ge=1, le=4)
+    uniqueness_threshold: float = Field(0.72, ge=0.50, le=0.95)
+
+
+class VoiceCandidateSaveRequest(BaseModel):
+    session_id: str = Field(..., min_length=8, max_length=80)
+    filename: str = Field(..., min_length=5, max_length=180)
+    voice_name: str = Field(..., min_length=1, max_length=80)
 
 
 class RemoveJobsRequest(BaseModel):

@@ -1,127 +1,115 @@
 # SoftMeta Chatterbox TTS Server
 
-A professional, self-hosted speech studio maintained by **SoftMeta**. The
-server, queue, browser interface, waveform tools and audio editor are SoftMeta
-code. Chatterbox inference is provided by the official MIT-licensed Chatterbox
-package from Resemble AI through `soft-meta/chatterbox-v2`.
+## v0.7.0 identity-first voice search
 
-## v0.4.0 highlights
+- Rebuilds Generate Voice around a stable identity fingerprint before age, emotion, or performance.
+- Over-generates up to 12 Qwen3-TTS attempts and returns only the requested distinct candidates.
+- Compares each attempt with saved generated voices and every earlier attempt in the same batch.
+- Automatically rejects repeated identities instead of showing the same speaker with a new tune.
+- Replaces the confusing “100% different” first-candidate label with a truthful baseline label.
+- Shows closest speaker similarity, comparison count, identity code, vocal anatomy and spectral traits.
+- Separates age behaviour from identity: age changes texture, projection, breath support and thought grouping, not global playback speed.
+- Keeps the professional v0.6.0 UI, five predefined voices, queue, waveform, cutter and multi-audio workflow.
+- Use `colab/SoftMeta_Chatterbox_TTS_Colab_v0.7.0.ipynb`.
 
-### Age-aware Natural Human Voice Designer
+## v0.6.0 professional workspace and voice diversity update
 
-- Explicit **Speaker Age** field from 18 to 110
-- Explicit **Male** or **Female** selection
-- **US English (American accent)** is enforced for generated voice references
-- Main emotion choices for warm, calm, reflective, concerned, serious or hopeful delivery
-- Age-specific pacing and vocal behaviour:
-  - 50s: slightly slower and thoughtful
-  - 60s: slow and clear
-  - 70s: noticeably slow and considered
-  - 80s: very slow and careful
-  - 90+: very slow, fragile but understandable and mentally present
-- Automatic Natural Human Voice Formula that discourages narrator, announcer,
-  customer-service and synthetic AI rhythms
-- Stable Parler-TTS speaker identities selected by gender and seed
-- Gentle age-tempo correction for the generated reference sample
-- Automatic recommended final Chatterbox speed after a generated voice is selected
-- Saved JSON profile beside each generated reference WAV
+- Keeps generated candidate preview players stable while the queue polls in the background.
+- Starts with Audio 1 only; every added Audio 2–5 tab has a removable minus control.
+- Adds a clearer professional workspace layout, stronger visual hierarchy and responsive spacing.
+- Adds a direct **Chatterbox TTS API** link under API Docs.
+- Bundles five user-provided predefined American male WAV references.
+- Expands Qwen3-TTS voice identity families, age-conditioned vocal character and sampling variation.
+- Uses a stricter similarity threshold and prevents saving candidates marked too similar.
+- Automatically advances the variation seed after each successful candidate batch.
+- Use `colab/SoftMeta_Chatterbox_TTS_Colab_v0.7.0.ipynb`.
 
-Text-described age, accent and identity are still approximate. The generated
-reference is intended as a practical voice-design starting point, not a promise
-of an exact biological age or a specific real person.
 
-### Professional multi-audio studio
+## v0.5.2 model snapshot fix
 
-- Chatterbox Original English is the default model
-- Motivational Speech is the default preset
-- Audio 1 and Audio 2 are available by default
-- Add workspaces up to Audio 5
-- Remove Audio 3, 4 or 5 with the minus button
-- Separate title, script, voice and generation settings for every workspace
+- Pins the complete official Qwen3-TTS VoiceDesign revision.
+- Uses a validated local model snapshot to avoid stale Hugging Face cache files.
+- Installs SoX for the isolated Qwen environment.
+- Use `colab/SoftMeta_Chatterbox_TTS_Colab_v0.7.0.ipynb`.
+
+
+## v0.5.1 hotfix
+
+- Fixed the Qwen3-TTS Colab verification cell syntax error.
+- No engine, UI workflow, or voice-generation behaviour was changed.
+- Use `colab/SoftMeta_Chatterbox_TTS_Colab_v0.7.0.ipynb`.
+
+A professional, self-hosted speech studio maintained by **SoftMeta**. The server,
+queue, browser UI, waveform tools and audio editor are SoftMeta code. Chatterbox
+inference uses the official MIT-licensed Chatterbox package from Resemble AI
+through `soft-meta/chatterbox-v2`.
+
+## v0.5.0 highlights
+
+### Qwen3-TTS Unique Voice Designer
+
+- Replaces Parler-TTS with the official Qwen3-TTS VoiceDesign model
+- Generates 2, 3 or 4 new fictional voice candidates in one request
+- Explicit speaker age, male/female gender, US English and General American accent
+- Age-aware cadence based on phrase length, thought pauses and breathing
+- Does **not** globally slow or stretch the generated reference audio
+- Varies pitch, resonance, texture, articulation, personality and cadence by seed
+- Preview and download every candidate before saving
+- Save only the selected candidate as a reusable Chatterbox reference voice
+- Optional SpeechBrain ECAPA speaker-difference check against saved generated voices
+- Candidate metadata, prompt, seed and optional embedding are saved with the voice
+
+The Voice Designer does not imitate a named real person. Age and identity are
+model-generated approximations, so listen before saving.
+
+### Multi-audio studio
+
+- Audio 1 and Audio 2 by default, expandable to Audio 5
+- Separate title, script, voice and settings per workspace
 - Generate one audio or schedule all prepared workspaces with **Generate All**
-- Use **Remove All** after the queue finishes to clear completed work
-
-### Voice workflows
-
-- Predefined voices
-- Uploaded reference voice cloning
-- Voice preview before generation
-- Age-aware **Generate Voice** reference creation using Parler-TTS Mini v1.1
-- Generated references can be previewed, downloaded, saved and selected for
-  Chatterbox long-form cloning
-
-Only use voices and voice descriptions that respect consent and applicable law.
-
-### Queue and progress
-
-- Server-side sequential GPU queue for stable L4 operation
-- Generate up to five prepared audio jobs without waiting at the browser
-- Queue Monitor with selectable titles
-- Live generated and remaining percentages
-- Live word progress, elapsed time, ETA and estimated final duration
-- Minimise the monitor to a bottom-right live status widget
+- Sequential server-side GPU queue for stable L4 use
+- Queue Monitor with live words, percentage, elapsed time, ETA and audio duration
 - Preview and download completed audio while the next job is running
+- Remove All and removable Audio 3–5 tabs
 
-### Generated audio and editing
+### Generated audio tools
 
-- One custom playback control directly below the waveform
-- Live playhead, current time and seek control
-- Download WAV remains available if waveform loading fails
-- Mouse time and click-to-set Start or End
-- Zoom, fit, horizontal wheel scrolling and drag-to-pan
-- Preview Selected and Download Selected WAV
-- Part One and Part Two downloads with title-based filenames
-- Original generated WAV remains unchanged by cutting
+- Main waveform with live playhead and time display
+- Browser audio fallback if waveform drawing fails
+- Start and End selection, zoom, fit, wheel scroll and drag-to-pan
+- Preview Selected, Download Selected, Part One and Part Two
+- Original generated WAV remains unchanged
 
 ## Repository relationship
 
 ```text
 soft-meta/chatterbox-v2@v0.2.1
         ↓
-soft-meta/Chatterbox-TTS-Server@v0.4.0
+soft-meta/Chatterbox-TTS-Server@v0.7.0
         ↓
 Google Colab L4, local Python or Docker
 ```
 
-This repository has no runtime dependency on `devnen/Chatterbox-TTS-Server` or
-`devnen/chatterbox-v2`.
+This project has no runtime dependency on Devnen repositories.
 
 ## Google Colab
 
-Open `colab/SoftMeta_Chatterbox_TTS_Colab_v0.4.0.ipynb`, select an L4 GPU and
-run every cell from top to bottom. The notebook uses SoftMeta engine `v0.2.1`
-and server/UI `v0.4.0`.
+Open `colab/SoftMeta_Chatterbox_TTS_Colab_v0.7.0.ipynb`, select an L4 GPU and
+run all cells. The notebook creates two isolated environments:
 
-Generate Voice runs Parler-TTS in a separate virtual environment because
-Parler-TTS 0.2.3 and Chatterbox 0.1.7 require incompatible Transformers
-versions. The Colab notebook creates this environment automatically.
+- Chatterbox main server environment
+- Qwen3-TTS VoiceDesign environment
+
+The first Generate Voice request downloads the Qwen3-TTS VoiceDesign model.
 
 ## Local installation
 
-Python 3.11 and a compatible PyTorch installation are recommended.
-
-```bash
-git clone --branch v0.2.1 https://github.com/soft-meta/chatterbox-v2.git
-git clone --branch v0.4.0 https://github.com/soft-meta/Chatterbox-TTS-Server.git
-
-python -m pip install chatterbox-tts==0.1.7
-python -m pip install --no-deps -e ./chatterbox-v2
-python -m pip install -r ./Chatterbox-TTS-Server/requirements.txt
-
-cd Chatterbox-TTS-Server
-python start.py
-```
-
-Open `http://127.0.0.1:8004`.
-
-## Reference voice guidance
-
-For Chatterbox cloning, use a clean 10–20 second recording from one speaker
-with no music, echo or strong background noise. The reference recording has a
-large influence on identity and accent.
+Python 3.11 and compatible PyTorch/CUDA installations are recommended. Use a
+separate Python environment for `requirements-voice.txt` and set
+`SOFTMETA_VOICE_PYTHON` to that environment's Python executable.
 
 ## Licence
 
-SoftMeta server and UI code are MIT licensed. Chatterbox software and model
-technology remain the work of Resemble AI. Generate Voice uses Parler-TTS under
-Apache-2.0. See `THIRD_PARTY_NOTICES.md`.
+SoftMeta server and UI code are MIT licensed. Chatterbox remains MIT licensed by
+Resemble AI. Qwen3-TTS and SpeechBrain are Apache-2.0 licensed. See
+`THIRD_PARTY_NOTICES.md`.

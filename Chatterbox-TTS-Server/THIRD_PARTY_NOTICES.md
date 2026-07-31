@@ -8,24 +8,27 @@ and model technology developed by Resemble AI.
 - Upstream: https://github.com/resemble-ai/chatterbox
 - Licence: MIT
 
-The original Chatterbox copyright and licence remain with their respective
-owners. SoftMeta does not claim authorship of the underlying Chatterbox model.
+## Qwen3-TTS
+
+The optional **Generate Voice** feature uses Qwen3-TTS VoiceDesign to create new
+fictional reference voices from natural-language descriptions.
+
+- Upstream: https://github.com/QwenLM/Qwen3-TTS
+- Model: Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign
+- Licence: Apache-2.0
+
+## SpeechBrain speaker embeddings
+
+The optional candidate difference check uses SpeechBrain ECAPA-TDNN speaker
+embeddings. It is a similarity aid, not a guarantee that two voices will always
+sound different to every listener.
+
+- Upstream: https://github.com/speechbrain/speechbrain
+- Model: speechbrain/spkrec-ecapa-voxceleb
+- Licence: Apache-2.0
 
 ## SoftMeta code
 
-The server, queue, web interface, waveform tools, audio cutter and Colab launcher
-in this repository are maintained by SoftMeta under the repository MIT licence.
-
-
-## Parler-TTS
-
-The optional **Generate Voice** feature uses the open-source Parler-TTS project
-from Hugging Face to create a short text-described reference WAV.
-
-- Upstream: https://github.com/huggingface/parler-tts
-- Model: https://huggingface.co/parler-tts/parler-tts-mini-v1.1
-- Licence: Apache-2.0
-
-The generated reference is then used by Chatterbox voice cloning. A text
-description controls broad characteristics and style, but it does not guarantee
-a precise age, accent, identity or repeatable real-world person.
+The server, queue, web UI, waveform tools, audio cutter, voice-candidate workflow
+and Colab launcher in this repository are maintained by SoftMeta under the
+repository MIT licence.
