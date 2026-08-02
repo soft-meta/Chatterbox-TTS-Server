@@ -1,4 +1,4 @@
-# Avatar Talking in SoftMeta v0.9.0
+# Avatar Talking in SoftMeta v0.9.2
 
 ## UI placement
 
@@ -82,3 +82,14 @@ assets named `insightface_det` or `det_10g`. InsightFace states that its supplie
 pretrained models are for non-commercial research unless separately licensed.
 SoftMeta does not change or grant those rights. Obtain appropriate permission or
 replace the restricted detector assets before monetized deployment.
+
+## v0.9.2 Colab backend policy
+
+Current Colab A100 images use a newer CUDA/Python stack than the legacy
+TensorRT 8.6.1 wheel used by the original Ditto test environment. SoftMeta
+therefore installs and selects the official Ditto PyTorch checkpoint by
+default. This avoids a false installation failure and keeps output quality
+unchanged. TensorRT remains an opt-in advanced path for matching custom images.
+
+Set `SOFTMETA_TRY_TENSORRT=1` during installation and
+`SOFTMETA_ENABLE_TENSORRT=1` at runtime only when TensorRT imports successfully.

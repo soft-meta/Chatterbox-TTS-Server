@@ -4,43 +4,17 @@ A self-hosted speech and long-form avatar studio maintained by **SoftMeta**.
 The server, persistent queues, browser UI, waveform editor, voice-candidate
 workflow and avatar orchestration are SoftMeta code.
 
-## v0.9.0: Generate Video and Avatar Talking
+## v0.9.2: dependency-stable A100 40GB build
 
-The audio tab row now always places **Generate Video** after the last existing
-audio workspace:
+- Removes the incompatible SciPy override from the isolated MOSS environment.
+- Uses the official MOSS-TTS `torch-runtime` dependency set.
+- Updates the speaker checker to SpeechBrain 1.1.0 and SoundFile audio I/O.
+- Adds a compatibility guard for stale cached SpeechBrain wheels.
+- Uses Ditto PyTorch as the stable Colab A100 40GB avatar backend.
+- Skips legacy TensorRT 8.6.1 by default instead of printing a failed build.
+- Verifies every isolated environment with `pip check` before starting the server.
+- Keeps checkpointed 10-30 minute video rendering and reduced working resolution.
 
-```text
-Audio 1 | Generate Video | +
-Audio 1 | Audio 2 | Generate Video | +
-Audio 1 | Audio 2 | Audio 3 | Generate Video | +
-```
-
-The button therefore moves to the right when Audio 2, Audio 3, Audio 4 or Audio
-5 is added. Audio 1 remains the only default workspace.
-
-### Complete Avatar Talking workflow
-
-- Upload a permitted PNG, JPG or WebP portrait
-- Use any completed Audio 1–5 result without downloading and uploading it again
-- Or upload a separate WAV, MP3, M4A, FLAC, OGG or AAC file
-- Render through an isolated Ditto TensorRT worker on A100
-- Automatically fall back to the official Ditto PyTorch checkpoint
-- Choose 9:16, 16:9 or 1:1 output
-- Choose portrait framing, image fit, 720p or 1080p delivery and 25 or 30 fps
-- Use continuous rendering for maximum visual continuity
-- Use checkpointed rendering for restart-friendly 10–30 minute jobs
-- Split checkpointed jobs near natural audio silence rather than fixed hard cuts
-- Persist video jobs and progress across page refreshes
-- Cancel safely, inspect logs, preview the result and download the MP4
-- Preserve the original full-quality audio in the final H.264/AAC file
-- Run duration-drift and long-freeze technical checks after rendering
-- Automatically unload the TTS model before avatar rendering and restore it after
-  the video finishes, preventing the two GPU workloads from competing
-
-No avatar model can guarantee that every viewer will believe a generated video
-is a camera recording. Use clear source images, review the entire output, and
-regenerate any segment with unnatural eyes, teeth, lips, hair or background
-motion.
 
 ## v0.8.0: MOSS unique voice generation
 
@@ -69,7 +43,7 @@ The **Generate Voice** workflow uses `OpenMOSS-Team/MOSS-VoiceGenerator`:
 ```text
 soft-meta/chatterbox-v2@v0.2.1
         ↓
-soft-meta/Chatterbox-TTS-Server@v0.9.0
+soft-meta/Chatterbox-TTS-Server@v0.9.2
         ↓
 Chatterbox + MOSS VoiceGenerator + isolated Ditto avatar worker
 ```
@@ -78,7 +52,7 @@ This project has no runtime dependency on Devnen repositories.
 
 ## Google Colab A100
 
-Open `colab/SoftMeta_Chatterbox_TTS_Colab_v0.9.0.ipynb`, select an **A100 GPU**
+Open `colab/SoftMeta_Chatterbox_TTS_Colab_v0.9.2.ipynb`, select an **A100 GPU**
 and run all cells. The notebook creates three isolated environments:
 
 - Python 3.11 Chatterbox server environment

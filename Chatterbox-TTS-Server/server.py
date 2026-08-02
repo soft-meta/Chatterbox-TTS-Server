@@ -36,7 +36,7 @@ from video_queue import VideoQueueManager
 from voice_designer import VoiceDesigner
 
 APP_NAME = "SoftMeta Chatterbox TTS Server"
-APP_VERSION = "0.9.0"
+APP_VERSION = "0.9.2"
 logger = logging.getLogger("softmeta.chatterbox")
 
 config = load_config()

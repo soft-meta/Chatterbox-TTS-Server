@@ -91,6 +91,21 @@ class AvatarEngineService:
             check=False,
         )
 
+    def _python_can_import(self, module: str) -> bool:
+        """Return True only when the isolated avatar Python can import a module."""
+
+        executable = str(self.python)
+        if not (self.python.is_file() or shutil.which(executable)):
+            return False
+        try:
+            result = self._run_capture(
+                [executable, "-c", f"import {module}"],
+                timeout=30,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        return result.returncode == 0
+
     def cancel_active(self) -> None:
         process = self._active_process
         if process is None or process.poll() is not None:
@@ -150,45 +165,54 @@ class AvatarEngineService:
     def backend_status(self) -> list[dict[str, Any]]:
         inference = self.ditto_dir / "inference.py"
         python_ok = self.python.is_file() or shutil.which(str(self.python)) is not None
-        return [
-            {
-                "id": item.id,
-                "label": item.label,
-                "ready": bool(
-                    python_ok
-                    and inference.is_file()
-                    and item.data_root.is_dir()
-                    and item.config_path.is_file()
-                ),
-                "data_root": str(item.data_root),
-                "config": str(item.config_path),
-            }
-            for item in self._backends()
-        ]
+        tensorrt_ok = self._python_can_import("tensorrt")
+        result: list[dict[str, Any]] = []
+        for item in self._backends():
+            module_ok = tensorrt_ok if item.id == "ditto_trt" else True
+            ready = bool(
+                python_ok
+                and inference.is_file()
+                and item.data_root.is_dir()
+                and item.config_path.is_file()
+                and module_ok
+            )
+            result.append(
+                {
+                    "id": item.id,
+                    "label": item.label,
+                    "ready": ready,
+                    "data_root": str(item.data_root),
+                    "config": str(item.config_path),
+                    "runtime_available": module_ok,
+                }
+            )
+        return result
 
     def status(self) -> dict[str, Any]:
         backends = self.backend_status()
         ready = any(item["ready"] for item in backends)
+        trt_enabled = os.getenv("SOFTMETA_ENABLE_TENSORRT", "0") == "1"
+        trt_ready = any(item["id"] == "ditto_trt" and item["ready"] for item in backends)
+        recommended = "ditto_trt" if trt_enabled and trt_ready else "ditto_pytorch"
         return {
             "ready": ready,
             "gpu": self.gpu_info(),
             "python": str(self.python),
             "ditto_dir": str(self.ditto_dir),
             "backends": backends,
-            "recommended": "ditto_trt" if any(
-                item["id"] == "ditto_trt" and item["ready"] for item in backends
-            ) else "ditto_pytorch",
+            "recommended": recommended,
             "message": (
-                "Ditto is ready for long-form avatar rendering."
+                "Ditto PyTorch is ready for stable long-form avatar rendering."
                 if ready
-                else "Install Ditto and its checkpoints with the v0.9.0 A100 notebook."
+                else "Install Ditto and its checkpoints with the v0.9.2 A100 40GB notebook."
             ),
         }
 
     def _resolve_backend(self, requested: str) -> DittoBackend:
         available = {item.id: item for item in self._backends()}
         if requested == "auto":
-            order = ("ditto_trt", "ditto_pytorch")
+            trt_enabled = os.getenv("SOFTMETA_ENABLE_TENSORRT", "0") == "1"
+            order = ("ditto_trt", "ditto_pytorch") if trt_enabled else ("ditto_pytorch",)
         else:
             order = (requested,)
         inference = self.ditto_dir / "inference.py"
@@ -225,8 +249,7 @@ class AvatarEngineService:
         except ValueError as error:
             raise AvatarEngineError(f"Invalid duration reported for {path.name}.") from error
 
-    @staticmethod
-    def _profile(aspect_ratio: str, resolution: str, quality: str) -> RenderProfile:
+    def _profile(self, aspect_ratio: str, resolution: str, quality: str) -> RenderProfile:
         final_sizes = {
             ("9:16", "720p"): (720, 1280),
             ("9:16", "1080p"): (1080, 1920),
@@ -236,12 +259,22 @@ class AvatarEngineService:
             ("1:1", "1080p"): (1080, 1080),
         }
         final_size = final_sizes[(aspect_ratio, resolution)]
-        # 720-class source gives Ditto a practical A100 long-video workload.
-        generation_size = {
-            "9:16": (720, 1280),
-            "16:9": (1280, 720),
-            "1:1": (768, 768),
-        }[aspect_ratio]
+        gpu = self.gpu_info()
+        memory_mb = gpu.get("memory_mb") or 0
+        # Colab commonly provides the A100 40GB. Generate at a lower working
+        # resolution and export at 720p/1080p to keep long jobs stable.
+        if 0 < memory_mb < 48_000:
+            generation_size = {
+                "9:16": (576, 1024),
+                "16:9": (1024, 576),
+                "1:1": (640, 640),
+            }[aspect_ratio]
+        else:
+            generation_size = {
+                "9:16": (720, 1280),
+                "16:9": (1280, 720),
+                "1:1": (768, 768),
+            }[aspect_ratio]
         return RenderProfile(
             generation_size=generation_size,
             final_size=final_size,
@@ -633,11 +666,21 @@ class AvatarEngineService:
         if audio_duration < 1.0:
             raise AvatarEngineError("Audio is too short to create a talking video.")
 
-        render_mode = str(job.get("render_mode", "continuous"))
+        render_mode = str(job.get("render_mode", "checkpointed"))
+        requested_segment_seconds = int(job.get("segment_seconds", 120))
+        gpu = self.gpu_info()
+        memory_mb = gpu.get("memory_mb") or 0
+        auto_checkpointed = False
+        # Offline inference on very long audio can grow system/GPU memory. On
+        # A100 40GB, automatically protect videos longer than five minutes.
+        if render_mode == "continuous" and 0 < memory_mb < 48_000 and audio_duration > 300:
+            render_mode = "checkpointed"
+            requested_segment_seconds = min(requested_segment_seconds, 120)
+            auto_checkpointed = True
         if render_mode == "checkpointed":
             boundaries = self._segment_boundaries(
                 prepared_audio,
-                int(job.get("segment_seconds", 180)),
+                requested_segment_seconds,
             )
         else:
             boundaries = [(0.0, audio_duration)]
@@ -687,6 +730,10 @@ class AvatarEngineService:
             "backend": backend.id,
             "backend_label": backend.label,
             "segments": total,
+            "effective_render_mode": render_mode,
+            "auto_checkpointed": auto_checkpointed,
+            "gpu_profile": "a100_40gb" if 0 < memory_mb < 48_000 else "standard",
+            "generation_size": list(profile.generation_size),
             "duration": quality["video_duration"],
             "quality_report": quality,
             "log_filename": log_path.name,

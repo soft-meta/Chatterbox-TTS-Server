@@ -24,8 +24,8 @@
       audio_preview_url: '',
       title: '',
       engine: 'auto',
-      render_mode: 'continuous',
-      segment_seconds: 180,
+      render_mode: 'checkpointed',
+      segment_seconds: 120,
       aspect_ratio: '9:16',
       resolution: '1080p',
       fps: 25,
@@ -1749,7 +1749,7 @@
     } else {
       box.dataset.state = 'error';
       strong.textContent = 'Avatar engine not installed';
-      small.textContent = status?.message || 'Run the v0.9.0 A100 installation cells.';
+      small.textContent = status?.message || 'Run the v0.9.2 A100 40GB installation cells.';
     }
   }
 
@@ -1819,7 +1819,7 @@
     if (payload.audio_source === 'audio_job' && !payload.audio_job_id) throw new Error('Select a completed audio track.');
     if (payload.audio_source === 'upload' && !payload.audio_filename) throw new Error('Upload an audio file.');
     if (!payload.consent) throw new Error('Confirm that you own or have permission to animate the avatar image.');
-    if (!state.initial?.avatar?.ready) throw new Error('Avatar engine is not installed. Run the v0.9.0 A100 notebook installation cells.');
+    if (!state.initial?.avatar?.ready) throw new Error('Avatar engine is not installed. Run the v0.9.2 A100 40GB notebook installation cells.');
   }
 
   async function generateVideo() {

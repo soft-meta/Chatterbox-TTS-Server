@@ -34,8 +34,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "ditto_dir": "/content/ditto-talkinghead",
         "ditto_checkpoints": "/content/ditto-talkinghead/checkpoints",
         "default_engine": "auto",
-        "default_render_mode": "continuous",
-        "default_segment_seconds": 180,
+        "default_render_mode": "checkpointed",
+        "default_segment_seconds": 120,
     },
     "generation_defaults": {
         "preset": "Motivational Speech",

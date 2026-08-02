@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.9.2
+
+- Fixed the fatal SpeechBrain import crash caused by an incompatible TorchAudio backend API
+- Updated the speaker checker from SpeechBrain 1.0.3 to 1.1.0
+- Removed conflicting `scipy`, `transformers`, `torch` and `torchaudio` overrides from SoftMeta voice requirements
+- Added a dedicated official MOSS installer with `pip check` and import verification
+- Added a safe compatibility shim for stale cached SpeechBrain wheels
+- Changed Colab A100 40GB Avatar Talking to Ditto PyTorch stable mode by default
+- Stopped attempting legacy TensorRT 8.6.1 unless explicitly enabled
+- Fixed backend readiness so TensorRT is never selected without an importable runtime
+- Added environment diagnostics and dependency checks before server startup
+- Updated server, notebook and UI cache keys to v0.9.2
+
+## v0.9.1
+
+- Fixed the Colab failure when `scripts/install_ditto_a100.sh` was absent from the GitHub tag
+- Added an embedded installer fallback inside the notebook
+- Added A100 40GB VRAM detection and safer working resolutions
+- Made checkpointed rendering with two-minute sections the long-video default
+- Automatically protects continuous jobs longer than five minutes on 40GB GPUs
+- Added GPU profile, effective render mode and generation size to video results
+- Updated server, notebook and UI cache keys to v0.9.1
+
 ## v0.9.0
 
 - Added a Generate Video tab that always follows the last current Audio workspace

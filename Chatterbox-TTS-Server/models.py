@@ -103,8 +103,8 @@ class VideoJobCreate(BaseModel):
     audio_job_id: str | None = None
     audio_filename: str | None = None
     engine: Literal["auto", "ditto_trt", "ditto_pytorch"] = "auto"
-    render_mode: Literal["continuous", "checkpointed"] = "continuous"
-    segment_seconds: int = Field(180, ge=60, le=600)
+    render_mode: Literal["continuous", "checkpointed"] = "checkpointed"
+    segment_seconds: int = Field(120, ge=60, le=600)
     aspect_ratio: Literal["9:16", "16:9", "1:1"] = "9:16"
     resolution: Literal["720p", "1080p"] = "1080p"
     fps: Literal[25, 30] = 25

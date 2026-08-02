@@ -121,7 +121,25 @@ def resolve_verified_model_snapshot(data: dict[str, Any]) -> Path:
     return local_dir
 
 
+def _prepare_speechbrain_audio_compatibility() -> None:
+    """Keep older cached SpeechBrain builds from crashing on new TorchAudio.
+
+    SpeechBrain 1.1.0 no longer depends on the removed TorchAudio backend API,
+    but Colab can occasionally reuse an older wheel from cache. This harmless
+    shim makes that stale combination importable while SoundFile remains the
+    actual audio reader used by SoftMeta.
+    """
+
+    try:
+        import torchaudio
+    except Exception:
+        return
+    if not hasattr(torchaudio, "list_audio_backends"):
+        torchaudio.list_audio_backends = lambda: ["soundfile"]  # type: ignore[attr-defined]
+
+
 def load_embedding_model():
+    _prepare_speechbrain_audio_compatibility()
     try:
         from speechbrain.inference.speaker import EncoderClassifier
     except Exception as error:

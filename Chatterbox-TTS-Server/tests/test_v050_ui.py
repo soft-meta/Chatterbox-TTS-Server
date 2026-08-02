@@ -12,5 +12,5 @@ def test_generate_voice_ui_uses_moss_candidate_workflow() -> None:
     assert "Generate Candidates" in html
     assert "Naturalness" in script
     assert "audio_temperature" in (ROOT / "voice_worker.py").read_text(encoding="utf-8")
-    assert "transformers==5.0.0" in requirements
-    assert "speechbrain==1.0.3" in requirements
+    assert "transformers==" not in requirements
+    assert "speechbrain==1.1.0" in requirements
