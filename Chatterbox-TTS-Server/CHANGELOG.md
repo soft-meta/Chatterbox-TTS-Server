@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.8.0
+
+- Replaced Qwen3-TTS VoiceDesign with official MOSS VoiceGenerator as the primary Generate Voice engine
+- Added a pinned and validated MOSS model snapshot with an isolated Python 3.12 Colab environment
+- Rebuilt voice instructions around compact identity-first MOSS prompts
+- Added broader American speech backgrounds and protected low, medium and high pitch diversity at every age
+- Added explicit guidance against global slowdown, stretched vowels and fixed stop-start pauses
+- Added acoustic quality screening for dead air, clipping, active speech level, dynamics and age-aware pause behaviour
+- Added Naturalness score and acoustic diagnostics to candidate cards
+- Added separate duplicate-identity and low-quality rejection counters
+- Preserved up to 12 internal attempts, ECAPA pairwise comparison and automatic duplicate rejection
+- Kept Chatterbox as the long-form cloning engine for selected generated voices
+- Updated server, UI cache keys, Docker and Colab release references to v0.8.0
+
 ## v0.7.0
 
 - Added identity-first speaker prompting so a new human identity is established before age and emotion

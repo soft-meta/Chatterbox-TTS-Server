@@ -13,4 +13,5 @@ services:
       SOFTMETA_HOST: 0.0.0.0
       SOFTMETA_PORT: 8004
       SOFTMETA_DEVICE: auto
-      SOFTMETA_VOICE_PYTHON: /opt/softmeta-qwen/bin/python
+      SOFTMETA_VOICE_PYTHON: /opt/softmeta-moss/bin/python
+      SOFTMETA_MOSS_MODEL_DIR: /models/moss_voice_generator

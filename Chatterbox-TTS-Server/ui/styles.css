@@ -528,7 +528,7 @@ html.dark .voice-designer { border-color: #4b477c; background: #252948; }
   .age-speed-badge { width: 100%; }
 }
 
-/* SoftMeta v0.5.0 Qwen3-TTS voice candidates */
+/* SoftMeta v0.8.0 MOSS voice candidates */
 .age-speed-badge small {
   display: block;
   margin-top: 2px;
@@ -863,3 +863,13 @@ textarea[data-field="text"] { min-height: 300px; line-height: 1.68; }
   font-weight: 750;
   letter-spacing: .04em;
 }
+
+
+/* v0.8.0 MOSS identity and acoustic-quality badges */
+.voice-score-stack { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.voice-quality { display: inline-flex; align-items: center; border-radius: 999px; padding: 5px 9px; font-size: 12px; font-weight: 750; border: 1px solid var(--line); background: var(--panel-soft); color: var(--muted); }
+.voice-quality.pass { border-color: rgba(22, 163, 74, .35); color: #15803d; background: rgba(22, 163, 74, .08); }
+.voice-quality.review { border-color: rgba(217, 119, 6, .35); color: #b45309; background: rgba(245, 158, 11, .10); }
+.voice-quality.reject { border-color: rgba(220, 38, 38, .35); color: #b91c1c; background: rgba(220, 38, 38, .08); }
+.voice-candidate-quality { margin: 4px 0 10px; color: var(--muted); font-size: 12px; }
+@media (max-width: 640px) { .voice-score-stack { align-items: flex-start; } }

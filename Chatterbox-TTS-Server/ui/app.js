@@ -571,6 +571,8 @@
         seed: candidate.seed,
         difference: candidate.uniqueness?.difference_score ?? null,
         status: candidate.uniqueness?.status ?? null,
+        quality: candidate.quality?.score ?? null,
+        qualityStatus: candidate.quality?.status ?? null,
       })),
     });
 
@@ -591,23 +593,33 @@
           : 'No close comparison found';
       const compared = Number(candidate.uniqueness?.reference_count || 0);
       const family = traits.voice_family ? `<span class="voice-family-chip">${safeText(traits.voice_family)}</span>` : '';
+      const quality = candidate.quality || {};
+      const qualityScore = Number(quality.score ?? 0).toFixed(1);
+      const qualityStatus = quality.status || 'not-checked';
+      const qualityText = quality.checked ? `Naturalness ${qualityScore}` : 'Quality not checked';
       const tooSimilar = candidate.uniqueness?.status === 'too_similar';
-      const needsReview = candidate.uniqueness?.status === 'review';
-      const saveLabel = tooSimilar ? 'Rejected — Generate Again' : needsReview ? 'Review and Save Voice' : 'Save and Use Voice';
-      const saveDisabled = tooSimilar ? 'disabled aria-disabled="true"' : '';
+      const qualityRejected = qualityStatus === 'reject';
+      const needsReview = candidate.uniqueness?.status === 'review' || qualityStatus === 'review';
+      const rejected = tooSimilar || qualityRejected;
+      const saveLabel = rejected ? 'Rejected — Generate Again' : needsReview ? 'Review and Save Voice' : 'Save and Use Voice';
+      const saveDisabled = rejected ? 'disabled aria-disabled="true"' : '';
       card.innerHTML = `
         <div class="voice-candidate-head">
           <div>
             <strong>Candidate ${Number(candidate.candidate_number || 0)}</strong>
             <span>Seed ${Number(candidate.seed || 0)} · ${safeText(candidate.age_label || '')}</span>
           </div>
-          <span class="voice-uniqueness ${label.className}">${label.text}</span>
+          <div class="voice-score-stack">
+            <span class="voice-uniqueness ${label.className}">${label.text}</span>
+            <span class="voice-quality ${safeText(qualityStatus)}">${safeText(qualityText)}</span>
+          </div>
         </div>
         ${family}
         <p class="voice-candidate-code">${safeText(candidate.identity_code || '')}</p>
         <p class="voice-candidate-traits">${safeText(traits.pitch || '')} · ${safeText(traits.vocal_anatomy || '')} · ${safeText(traits.spectral_colour || '')}</p>
         <p class="voice-candidate-traits">${safeText(traits.texture || '')} · ${safeText(traits.personality || '')} · ${safeText(traits.speaking_habit || '')}</p>
         <p class="voice-candidate-closest">${safeText(closest)}${compared ? ` · compared with ${compared} voice${compared === 1 ? '' : 's'}` : ''}</p>
+        <p class="voice-candidate-quality">Pause ${(Number(quality.silence_ratio || 0) * 100).toFixed(1)}% · level ${Number(quality.rms_db || 0).toFixed(1)} dBFS · dynamics ${Number(quality.dynamic_range_db || 0).toFixed(1)} dB</p>
         <audio controls preload="auto" src="${candidate.preview_url}"></audio>
         <div class="voice-candidate-actions">
           <a class="button button-secondary" href="${candidate.download_url}" download>Download Sample</a>
@@ -626,7 +638,7 @@
       player.addEventListener('pause', () => card.classList.remove('is-playing'));
       player.addEventListener('ended', () => card.classList.remove('is-playing'));
       const saveButton = card.querySelector('[data-save-candidate]');
-      if (!tooSimilar) saveButton.addEventListener('click', () => {
+      if (!rejected) saveButton.addEventListener('click', () => {
         if (needsReview && !confirm('This candidate is closer to another saved or batch voice than recommended. Save it anyway?')) return;
         saveVoiceCandidate(tab, candidate);
       });
@@ -695,7 +707,7 @@
     const status = tab.panel.querySelector('[data-role="voice-designer-status"]');
     button.disabled = true;
     button.textContent = 'Generating Candidates...';
-    status.textContent = 'Building identity-first Qwen3-TTS speakers, over-generating candidates and rejecting repeated identities. This can take longer because up to 12 attempts may be checked.';
+    status.textContent = 'Building identity-first MOSS speakers, over-generating candidates, screening acoustic quality, and rejecting repeated identities. Up to 12 attempts may be checked.';
     try {
       const result = await api('/api/voice-designer/generate', {
         method: 'POST',
@@ -720,7 +732,9 @@
       renderVoiceCandidates(tab, true);
       saveTabs();
       const checked = tab.generated_voice_candidates.filter(item => item.uniqueness?.checked).length;
-      status.textContent = `Selected ${tab.generated_voice_candidates.length} voice${tab.generated_voice_candidates.length === 1 ? '' : 's'} from ${Number(result.attempted_count || tab.generated_voice_candidates.length)} attempt${Number(result.attempted_count || 0) === 1 ? '' : 's'}. ${Number(result.rejected_count || 0)} repeated voice identit${Number(result.rejected_count || 0) === 1 ? 'y was' : 'ies were'} rejected.${result.search_exhausted ? ' The strict search returned fewer voices than requested.' : ''}`;
+      const duplicateRejected = Number(result.duplicate_rejected_count || 0);
+      const qualityRejected = Number(result.quality_rejected_count || 0);
+      status.textContent = `Selected ${tab.generated_voice_candidates.length} voice${tab.generated_voice_candidates.length === 1 ? '' : 's'} from ${Number(result.attempted_count || tab.generated_voice_candidates.length)} attempt${Number(result.attempted_count || 0) === 1 ? '' : 's'}. Rejected ${duplicateRejected} repeated identit${duplicateRejected === 1 ? 'y' : 'ies'} and ${qualityRejected} low-quality sample${qualityRejected === 1 ? '' : 's'}.${result.search_exhausted ? ' The strict search returned fewer voices than requested.' : ''}`;
       toast('Voice candidates are ready to preview.', 'success');
     } catch (error) {
       status.textContent = error.message;

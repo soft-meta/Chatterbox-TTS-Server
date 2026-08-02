@@ -166,12 +166,12 @@ def test_voice_designer_reports_missing_environment(tmp_path: Path) -> None:
             seed=1,
         )
     except RuntimeError as error:
-        assert "isolated Qwen3-TTS Generate Voice environment is missing" in str(error)
+        assert "isolated MOSS VoiceGenerator environment is missing" in str(error)
     else:
         raise AssertionError("Expected a missing environment error")
 
 
-def test_voice_designer_pins_verified_qwen_snapshot(tmp_path: Path) -> None:
+def test_voice_designer_pins_verified_moss_snapshot(tmp_path: Path) -> None:
     designer = VoiceDesigner(
         tmp_path / "voices",
         tmp_path / "candidates",
@@ -179,12 +179,15 @@ def test_voice_designer_pins_verified_qwen_snapshot(tmp_path: Path) -> None:
         worker_path=tmp_path / "worker.py",
         model_cache_dir=tmp_path / "models",
     )
-    assert designer.MODEL_REVISION == "fa0251e3279a10b4936dc49d69a59c41b07cbfc0"
+    assert designer.MODEL_REVISION == "97521ec"
     assert designer.model_cache_dir == tmp_path / "models"
 
 
-def test_voice_worker_requires_speech_tokenizer_preprocessor() -> None:
+def test_voice_worker_uses_verified_moss_snapshot_and_official_api() -> None:
     worker_source = (Path(__file__).resolve().parents[1] / "voice_worker.py").read_text(encoding="utf-8")
-    assert "speech_tokenizer/preprocessor_config.json" in worker_source
+    assert "OpenMOSS-Team/MOSS-VoiceGenerator" not in worker_source  # model id arrives from VoiceDesigner
     assert "snapshot_download" in worker_source
     assert "resolve_verified_model_snapshot" in worker_source
+    assert "AutoProcessor.from_pretrained" in worker_source
+    assert "audio_temperature" in worker_source
+    assert "evaluate_acoustic_quality" in worker_source

@@ -21,9 +21,9 @@ def test_v070_identity_profile_is_primary_and_stable() -> None:
     assert first.identity_code.startswith("SM-")
     assert first.identity_code != second.identity_code
     assert first.identity_traits["vocal_anatomy"] != second.identity_traits["vocal_anatomy"] or first.identity_traits["spectral_colour"] != second.identity_traits["spectral_colour"]
-    assert "Speaker identity is the primary requirement" in first.effective_description
-    assert "same person with only a different pitch" in first.effective_description
-    assert "Do not imitate age by globally slowing" in first.effective_description
+    assert "clearly distinct, stable human identity" in first.effective_description
+    assert "Older age must not force a deep pitch" in first.effective_description
+    assert "Do not make a young voice sound old by slowing" in first.effective_description
 
 
 def test_v070_request_uses_stricter_default_threshold() -> None:
