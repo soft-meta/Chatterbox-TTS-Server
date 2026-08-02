@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import random
@@ -32,19 +33,21 @@ class VoiceProfile:
     identity_traits: dict[str, str]
     effective_description: str
     recommended_speed_factor: float
+    identity_code: str
+    identity_summary: str
 
 
 class VoiceDesigner:
-    """Create new, reusable human voice references with Qwen3-TTS VoiceDesign.
+    """Create new, reusable human voice references with MOSS VoiceGenerator.
 
-    Qwen3-TTS runs in an isolated Python environment because its Transformers
-    dependency is intentionally separate from Chatterbox. The worker loads the
-    official VoiceDesign checkpoint once per request, produces several distinct
-    candidates, and optionally compares speaker embeddings with saved voices.
+    MOSS VoiceGenerator runs in an isolated Python environment because its modern
+    Transformers and PyTorch stack is intentionally separate from Chatterbox.
+    The worker creates several distinct fictional identities, screens broken or
+    repetitive candidates, and compares speaker embeddings with saved voices.
     """
 
-    MODEL_ID = "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
-    MODEL_REVISION = "fa0251e3279a10b4936dc49d69a59c41b07cbfc0"
+    MODEL_ID = "OpenMOSS-Team/MOSS-VoiceGenerator"
+    MODEL_REVISION = "97521ec"
     RESULT_PREFIX = "SOFTMETA_RESULT="
 
     _MALE_PITCH = (
@@ -80,6 +83,18 @@ class VoiceDesigner:
         "thoughtful private conversationalist",
         "confident small-town speaker",
         "warm reflective grandparent",
+    )
+    _AMERICAN_BACKGROUNDS = (
+        "neutral Midwestern everyday speech",
+        "relaxed West Coast conversational speech",
+        "plain inland American speech",
+        "suburban Northeast American speech with no strong regional marker",
+        "rural Plains speech softened toward General American",
+        "Southern-influenced but broadly General American speech",
+        "working-class urban American speech with natural contractions",
+        "educated General American speech without announcer polish",
+        "small-town American speech with warm directness",
+        "quiet contemporary American family conversation",
     )
     _RESONANCE = (
         "chest-forward resonance",
@@ -177,6 +192,70 @@ class VoiceDesigner:
         "short recovery breaths after longer phrases",
         "gentle breath support with no gasping or theatrical fragility",
     )
+    _VOCAL_ANATOMY = (
+        "a long vocal tract impression with a broad lower resonance",
+        "a compact vocal tract impression with focused midrange energy",
+        "a narrow throat setting with lean, dry resonance",
+        "an open pharyngeal setting with rounded low harmonics",
+        "a smaller oral cavity impression with a brighter intimate tone",
+        "a broad oral cavity impression with dense chest support",
+        "a relaxed laryngeal setting with mellow lower overtones",
+        "a slightly raised laryngeal setting with a clear forward tone",
+        "a deep-set speaking mechanism with restrained upper brightness",
+        "a light, agile speaking mechanism with compact resonance",
+        "a heavy-set speaking mechanism with slow harmonic release",
+        "a balanced everyday speaking mechanism with an unusual dry edge",
+    )
+    _NASAL_BALANCE = (
+        "almost no nasal colour",
+        "a faint natural nasal edge",
+        "a moderately forward nasal balance",
+        "a warm oral tone with only slight nasal leakage",
+        "a dry, focused nasal-orality mix",
+        "a broad oral tone with occasional nasal consonant colour",
+    )
+    _VOWEL_SHAPE = (
+        "wide relaxed vowels",
+        "compact centred vowels",
+        "rounded back vowels",
+        "slightly flattened everyday vowels",
+        "clear front vowels with softened endings",
+        "narrow vowels with warm lower resonance",
+        "open conversational vowels with natural reduction",
+        "small precise vowels without announcer polish",
+    )
+    _CONSONANT_ATTACK = (
+        "soft consonant attacks",
+        "firm but unforced consonant attacks",
+        "slightly breath-led consonant starts",
+        "dry compact consonants",
+        "clear advice words with relaxed ordinary consonants",
+        "casual consonant reduction in unimportant words",
+        "light tongue-forward consonants",
+        "rounded consonants with softened final sounds",
+    )
+    _SPECTRAL_COLOUR = (
+        "dark spectral colour with restrained brightness",
+        "warm balanced spectral colour",
+        "dry mid-forward spectral colour",
+        "soft smoky spectral colour",
+        "clear upper-mid colour without youthful sparkle",
+        "dense low-mid colour with a thin airy edge",
+        "light reedy colour with grounded resonance",
+        "broad mellow colour with gentle high-frequency roll-off",
+    )
+    _SPEAKING_HABITS = (
+        "often begins thoughts softly before settling into them",
+        "uses brief direct openings and more reflective endings",
+        "occasionally holds a meaningful word for a fraction longer",
+        "connects everyday words but separates advice clearly",
+        "uses small hesitations before personal memories",
+        "lets some sentences trail gently instead of always closing firmly",
+        "uses quiet emphasis instead of extra loudness",
+        "sometimes starts the next thought before the previous energy fully disappears",
+        "alternates concise statements with slower reflective phrases",
+        "uses restrained questions that sound genuinely curious",
+    )
 
     def __init__(
         self,
@@ -186,7 +265,7 @@ class VoiceDesigner:
         *,
         python_executable: str | None = None,
         worker_path: Path | None = None,
-        timeout_seconds: int = 2700,
+        timeout_seconds: int = 5400,
         model_cache_dir: Path | None = None,
     ) -> None:
         self.output_dir = output_dir
@@ -202,7 +281,7 @@ class VoiceDesigner:
         self.worker_path = worker_path or Path(__file__).with_name("voice_worker.py")
         self.timeout_seconds = timeout_seconds
         self.model_cache_dir = model_cache_dir or Path(
-            os.getenv("SOFTMETA_QWEN_MODEL_DIR", "/content/softmeta_models/qwen3_voice_design")
+            os.getenv("SOFTMETA_MOSS_MODEL_DIR", "/content/softmeta_models/moss_voice_generator")
         )
         self.model_cache_dir.mkdir(parents=True, exist_ok=True)
         self._lock = RLock()
@@ -291,53 +370,70 @@ class VoiceDesigner:
         candidate_index: int,
     ) -> VoiceProfile:
         age = max(18, min(110, int(age)))
-        randomiser = random.Random(int(seed))
+        identity_seed = (int(seed) + (candidate_index + 1) * 104_729 + 7_919) % 2_147_483_647
+        randomiser = random.Random(identity_seed)
         gender_noun = "man" if gender == "male" else "woman"
 
-        # Use rotated, coprime steps instead of independent random choices so
-        # candidates in one batch deliberately occupy different vocal regions.
-        def distinct(sequence: tuple[str, ...], step: int, salt: int) -> str:
-            start = randomiser.randrange(len(sequence))
-            return sequence[(start + candidate_index * step + salt) % len(sequence)]
+        # Each attempt is intentionally pushed into different vocal regions.
+        def choose(sequence: tuple[str, ...], salt: int) -> str:
+            local = random.Random(identity_seed ^ (salt * 1_000_003))
+            return sequence[local.randrange(len(sequence))]
 
         pitch_pool = cls._MALE_PITCH if gender == "male" else cls._FEMALE_PITCH
         age_label, pace_label, phrase_guidance = cls._age_settings(age)
         age_texture = cls._age_vocal_character(age)
         traits = {
-            "voice_family": distinct(cls._VOICE_FAMILIES, 5, 1),
-            "pitch": distinct(pitch_pool, 3, 0),
-            "resonance": distinct(cls._RESONANCE, 3, 2),
-            "texture": distinct(cls._TEXTURE, 5, 3),
-            "vocal_weight": distinct(cls._VOCAL_WEIGHT, 3, 4),
-            "articulation": distinct(cls._ARTICULATION, 7, 5),
-            "personality": distinct(cls._PERSONALITY, 5, 6),
-            "cadence": distinct(cls._CADENCE, 7, 7),
-            "melody": distinct(cls._MELODY, 3, 1),
-            "breath_style": distinct(cls._BREATH_STYLE, 5, 2),
+            "voice_family": choose(cls._VOICE_FAMILIES, 1),
+            "american_background": choose(cls._AMERICAN_BACKGROUNDS, 17),
+            "pitch": choose(pitch_pool, 2),
+            "vocal_anatomy": choose(cls._VOCAL_ANATOMY, 3),
+            "resonance": choose(cls._RESONANCE, 4),
+            "spectral_colour": choose(cls._SPECTRAL_COLOUR, 5),
+            "nasal_balance": choose(cls._NASAL_BALANCE, 6),
+            "texture": choose(cls._TEXTURE, 7),
+            "vocal_weight": choose(cls._VOCAL_WEIGHT, 8),
+            "vowel_shape": choose(cls._VOWEL_SHAPE, 9),
+            "consonant_attack": choose(cls._CONSONANT_ATTACK, 10),
+            "articulation": choose(cls._ARTICULATION, 11),
+            "personality": choose(cls._PERSONALITY, 12),
+            "speaking_habit": choose(cls._SPEAKING_HABITS, 13),
+            "cadence": choose(cls._CADENCE, 14),
+            "melody": choose(cls._MELODY, 15),
+            "breath_style": choose(cls._BREATH_STYLE, 16),
             "age_character": age_texture,
         }
+        fingerprint_source = json.dumps(
+            {"age": age, "gender": gender, "identity_seed": identity_seed, "traits": traits},
+            ensure_ascii=True,
+            sort_keys=True,
+        ).encode("utf-8")
+        identity_code = "SM-" + hashlib.sha256(fingerprint_source).hexdigest()[:10].upper()
+        identity_summary = (
+            f"{traits['pitch']}; {traits['vocal_anatomy']}; {traits['spectral_colour']}; "
+            f"{traits['nasal_balance']}; {traits['texture']}"
+        )
+
         notes = " ".join(description.strip().split())
         if len(notes) > 700:
             notes = notes[:697].rstrip() + "..."
 
         effective = (
-            f"Create one original, believable {age}-year-old American {gender_noun}. "
-            "This must be a new fictional speaker identity and must not imitate any known real person. "
-            "Use natural General American English pronunciation, but do not make the voice generic or identical to other American speakers. "
-            f"The speaker's social voice family is a {traits['voice_family']}. "
-            f"The vocal identity has {traits['pitch']}, {traits['resonance']}, {traits['vocal_weight']}, and {traits['texture']}. "
-            f"Use {traits['melody']}. The person is {traits['personality']}. "
-            f"Use {traits['articulation']}, {traits['cadence']}, and {traits['breath_style']}. "
-            f"The age impression is {age_label}: {age_texture}. The speaking pace is {pace_label}. {phrase_guidance} "
-            "The requested age must change the natural vocal texture, physical energy, phrase planning, breath placement, and sentence release. "
-            "Do not create a young voice and merely slow the playback. Create the age naturally, not by stretching vowels or globally time-stretching the recording. "
-            f"The emotional baseline is {cls._emotion_text(emotion)}. "
-            "Speak privately to one trusted listener in a quiet room, as if sharing a real memory, warning, or piece of advice from personal experience. "
-            "Use tiny human variations in pitch, timing, energy, breath, emphasis, and sentence rhythm. Connect ordinary words naturally and give meaningful words quiet attention. "
-            "Do not sound like an AI assistant, audiobook narrator, advertisement, newsreader, radio host, documentary narrator, customer-service agent, or motivational stage speaker. "
-            "Avoid perfect timing, repeated sentence melody, identical pause lengths, excessive clarity, constant dramatic emphasis, and a repeated falling tone. "
-            "Keep the speaker mentally clear and emotionally connected. Do not exaggerate weakness, shaking, gasping, sickness, confusion, or frailty. "
-            "The recording is close-microphone, dry, intimate, clear, and free of music, echo, and background noise."
+            f"General American English. Create a fictional {age}-year-old American {gender_noun} with a clearly distinct, stable human identity. "
+            f"Identity: {traits['pitch']}; {traits['vocal_anatomy']}; {traits['resonance']}; "
+            f"{traits['spectral_colour']}; {traits['nasal_balance']}; {traits['vocal_weight']}; {traits['texture']}. "
+            f"Speech background: {traits['american_background']}. Social character: {traits['voice_family']}; "
+            f"{traits['personality']}. Articulation: {traits['vowel_shape']}; {traits['consonant_attack']}; "
+            f"{traits['articulation']}. Habit: {traits['speaking_habit']}. Melody and cadence: "
+            f"{traits['melody']}; {traits['cadence']}; {traits['breath_style']}. "
+            f"Age behaviour: {age_texture}. Pace: {pace_label}. {phrase_guidance} "
+            f"Emotion: {cls._emotion_text(emotion)}. "
+            "Older age must not force a deep pitch. Keep the assigned low, medium, or high male or female range. "
+            "Do not make a young voice sound old by slowing the recording. Create age naturally, not by stretching vowels. Do not stretch vowels, and do not pause after every few words. "
+            "Use irregular pauses only for breathing, thinking, remembering, or changing ideas. Keep normal word formation and mental clarity. "
+            "Speak privately to one trusted listener. Sound naturally imperfect and personally experienced, not polished. "
+            "Never sound like an AI assistant, audiobook narrator, advertisement, newsreader, radio host, or motivational stage speaker. "
+            "Avoid a recurring house narrator, repeated sentence melody, fixed pause lengths, theatrical frailty, and synthetic smoothness. "
+            "Close microphone, dry clean recording, no music, no echo, no background noise."
         )
         if notes:
             effective += f" Additional direction: {notes}"
@@ -353,13 +449,15 @@ class VoiceDesigner:
             identity_traits=traits,
             effective_description=effective,
             recommended_speed_factor=1.0,
+            identity_code=identity_code,
+            identity_summary=identity_summary,
         )
 
     def _validate_runner(self) -> None:
         python_path = Path(self.python_executable)
         if not python_path.exists():
             raise RuntimeError(
-                "The isolated Qwen3-TTS Generate Voice environment is missing. "
+                "The isolated MOSS VoiceGenerator environment is missing. "
                 "Restart the Colab runtime and run every installation cell again. "
                 f"Expected Python executable: {python_path}"
             )
@@ -375,7 +473,7 @@ class VoiceDesigner:
                 if not isinstance(result, dict):
                     break
                 return result
-        raise RuntimeError(f"Qwen3-TTS worker did not return a result payload.\n{stdout[-8000:]}")
+        raise RuntimeError(f"MOSS VoiceGenerator worker did not return a result payload.\n{stdout[-8000:]}")
 
     def generate_candidates(
         self,
@@ -389,11 +487,12 @@ class VoiceDesigner:
         language: str = "en-US",
         emotion: Emotion = "warm",
         candidate_count: int = 3,
-        uniqueness_threshold: float = 0.78,
+        uniqueness_threshold: float = 0.72,
     ) -> dict[str, Any]:
         with self._lock:
             self._validate_runner()
             candidate_count = max(1, min(4, int(candidate_count)))
+            max_attempts = min(12, max(candidate_count * 3, candidate_count + 4))
             session_id = uuid.uuid4().hex
             session_dir = self.candidate_root / session_id
             session_dir.mkdir(parents=True, exist_ok=False)
@@ -407,7 +506,7 @@ class VoiceDesigner:
                     seed=seed,
                     candidate_index=index,
                 )
-                for index in range(candidate_count)
+                for index in range(max_attempts)
             ]
             request = {
                 "model_id": self.MODEL_ID,
@@ -421,6 +520,7 @@ class VoiceDesigner:
                 "session_dir": str(session_dir),
                 "saved_voice_dir": str(self.output_dir),
                 "candidate_count": candidate_count,
+                "max_attempts": max_attempts,
                 "uniqueness_threshold": float(uniqueness_threshold),
                 "profiles": [asdict(profile) for profile in profiles],
             }
@@ -430,7 +530,7 @@ class VoiceDesigner:
                 with tempfile.NamedTemporaryFile(
                     mode="w",
                     suffix=".json",
-                    prefix="softmeta_qwen_voice_",
+                    prefix="softmeta_moss_voice_",
                     delete=False,
                     encoding="utf-8",
                 ) as handle:
@@ -463,7 +563,7 @@ class VoiceDesigner:
                     shutil.rmtree(session_dir, ignore_errors=True)
                     details = (result.stdout or "No worker output.")[-12000:]
                     raise RuntimeError(
-                        "The isolated Qwen3-TTS Generate Voice worker failed.\n"
+                        "The isolated MOSS VoiceGenerator worker failed.\n"
                         f"Python: {self.python_executable}\n"
                         f"Exit code: {result.returncode}\n"
                         f"Worker output:\n{details}"
@@ -472,7 +572,7 @@ class VoiceDesigner:
                 candidates = payload.get("candidates")
                 if not isinstance(candidates, list) or not candidates:
                     shutil.rmtree(session_dir, ignore_errors=True)
-                    raise RuntimeError("Qwen3-TTS finished without creating voice candidates.")
+                    raise RuntimeError("MOSS VoiceGenerator finished without creating voice candidates.")
                 return payload
             except subprocess.TimeoutExpired as error:
                 shutil.rmtree(session_dir, ignore_errors=True)
@@ -519,7 +619,7 @@ class VoiceDesigner:
                     "name": voice_name.strip(),
                     "filename": destination.name,
                     "saved_at": time.time(),
-                    "source": "Qwen3-TTS VoiceDesign",
+                    "source": "MOSS VoiceGenerator",
                     "model_id": self.MODEL_ID,
                     "model_revision": self.MODEL_REVISION,
                 }
