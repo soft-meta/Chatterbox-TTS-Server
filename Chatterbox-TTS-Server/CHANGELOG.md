@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.9.0
+
+- Added a Generate Video tab that always follows the last current Audio workspace
+- Added avatar image and separate audio upload storage
+- Added direct completed Audio 1–5 selection for video creation
+- Added an isolated A100 Ditto TensorRT/PyTorch worker
+- Added continuous and silence-aware checkpointed long-video rendering
+- Added a persistent video queue with progress, ETA, cancellation and logs
+- Added portrait, landscape and square video delivery settings
+- Added final H.264/AAC encoding with original-audio restoration
+- Added duration-drift and long-freeze technical quality checks
+- Added Avatar Talking API endpoints, documentation and Colab installer
+- Updated server, UI cache keys and release references to v0.9.0
+
 ## v0.8.0
 
 - Replaced Qwen3-TTS VoiceDesign with official MOSS VoiceGenerator as the primary Generate Voice engine

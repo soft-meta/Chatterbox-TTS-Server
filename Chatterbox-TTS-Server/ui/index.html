@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f7f9fc">
   <title>SoftMeta Chatterbox TTS Server</title>
-  <link rel="stylesheet" href="/static/styles.css?v=0.8.0">
+  <link rel="stylesheet" href="/static/styles.css?v=0.9.0">
 </head>
 <body>
   <header class="app-header">
@@ -67,13 +67,14 @@
         <li>For long scripts, keep <strong>Split text into chunks</strong> enabled.</li>
         <li>Use a clean 10–20 second single-speaker reference for voice cloning.</li>
         <li>For a natural American delivery, use an American-accent reference recording.</li>
-        <li>Audio jobs run one at a time so the GPU remains stable.</li>
+        <li>Audio and avatar jobs share one GPU safely and never run at the same time.</li>
+        <li>For 10–30 minute videos, use Continuous mode first; Checkpointed mode trades seamless motion for restart safety.</li>
       </ul>
     </section>
   </main>
 
   <footer class="app-footer">
-    <span><a href="https://github.com/soft-meta/chatterbox-v2" target="_blank" rel="noopener">SoftMeta Chatterbox TTS</a> Server v0.8.0</span>
+    <span><a href="https://github.com/soft-meta/chatterbox-v2" target="_blank" rel="noopener">SoftMeta Chatterbox TTS</a> Server v0.9.0</span>
     <span>Powered by the official open-source Chatterbox engine</span>
   </footer>
 
@@ -379,6 +380,121 @@
     </article>
   </template>
 
-  <script src="/static/app.js?v=0.8.0" defer></script>
+
+  <template id="video-panel-template">
+    <article class="video-studio-panel hidden">
+      <div class="video-hero">
+        <div>
+          <span class="section-eyebrow">A100 long-form studio</span>
+          <h2>Avatar Talking</h2>
+          <p>Upload one permitted avatar image, choose a completed audio track, and render a long-form talking-human MP4 with the open-source Ditto engine.</p>
+        </div>
+        <div data-role="avatar-engine-state" class="avatar-engine-state" data-state="checking">
+          <span class="model-dot"></span>
+          <div><strong>Checking avatar engine</strong><small>Please wait...</small></div>
+        </div>
+      </div>
+
+      <div class="video-builder-grid">
+        <section class="video-builder-card">
+          <div class="video-step-title"><span>1</span><div><h3>Avatar Image</h3><p>Use a clear, front-facing portrait with visible eyes and mouth.</p></div></div>
+          <label data-role="avatar-drop" class="avatar-drop-zone">
+            <input data-role="avatar-upload" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+            <img data-role="avatar-preview" class="avatar-preview hidden" alt="Uploaded avatar preview">
+            <div data-role="avatar-placeholder" class="avatar-placeholder">
+              <span class="avatar-upload-icon">＋</span>
+              <strong>Upload Avatar Image</strong>
+              <small>PNG, JPG or WebP · recommended 1080 × 1920</small>
+            </div>
+          </label>
+          <div class="asset-meta-row">
+            <span data-role="avatar-filename">No avatar selected</span>
+            <button data-action="remove-avatar" class="text-button hidden" type="button">Remove</button>
+          </div>
+        </section>
+
+        <section class="video-builder-card">
+          <div class="video-step-title"><span>2</span><div><h3>Audio Source</h3><p>Use any completed Audio 1–5 result or upload a separate file.</p></div></div>
+          <div class="audio-source-switch" role="tablist" aria-label="Video audio source">
+            <button data-video-audio-mode="audio_job" class="active" type="button">Generated Audio</button>
+            <button data-video-audio-mode="upload" type="button">Upload Audio</button>
+          </div>
+          <div data-role="video-generated-audio-tools">
+            <label class="field">
+              <span>Select Completed Audio</span>
+              <select data-field="video_audio_job_id"></select>
+            </label>
+            <p data-role="video-audio-help" class="video-inline-help">Complete an Audio workspace first, then it appears here automatically.</p>
+          </div>
+          <div data-role="video-upload-audio-tools" class="hidden">
+            <label class="button button-secondary video-upload-button">
+              <input data-role="video-audio-upload" type="file" accept="audio/*" hidden>
+              Upload WAV or MP3
+            </label>
+            <audio data-role="video-upload-audio-player" class="video-audio-player hidden" controls preload="metadata"></audio>
+            <div class="asset-meta-row">
+              <span data-role="video-audio-filename">No audio uploaded</span>
+              <button data-action="remove-video-audio" class="text-button hidden" type="button">Remove</button>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <section class="video-settings-card">
+        <div class="video-settings-heading">
+          <div><h3>Video Settings</h3><p>Defaults are tuned for portrait Facebook videos and long A100 rendering.</p></div>
+          <span class="a100-badge">A100 Optimized</span>
+        </div>
+        <div class="video-settings-grid">
+          <label class="field"><span>Video Title</span><input data-field="video_title" maxlength="180" placeholder="My long-form avatar video"></label>
+          <label class="field"><span>Avatar Engine</span><select data-field="video_engine"><option value="auto">Auto · Prefer Ditto TensorRT</option><option value="ditto_trt">Ditto TensorRT · Fast</option><option value="ditto_pytorch">Ditto PyTorch · Fallback</option></select></label>
+          <label class="field"><span>Long Video Mode</span><select data-field="video_render_mode"><option value="continuous">Continuous · Best visual continuity</option><option value="checkpointed">Checkpointed · Safer for very long jobs</option></select></label>
+          <label class="field"><span>Checkpoint Length</span><select data-field="video_segment_seconds"><option value="120">About 2 minutes</option><option value="180" selected>About 3 minutes</option><option value="300">About 5 minutes</option><option value="600">About 10 minutes</option></select></label>
+          <label class="field"><span>Aspect Ratio</span><select data-field="video_aspect_ratio"><option value="9:16">9:16 Portrait</option><option value="16:9">16:9 Landscape</option><option value="1:1">1:1 Square</option></select></label>
+          <label class="field"><span>Final Resolution</span><select data-field="video_resolution"><option value="1080p">1080p High Quality</option><option value="720p">720p Faster</option></select></label>
+          <label class="field"><span>Frame Rate</span><select data-field="video_fps"><option value="25">25 FPS · Recommended</option><option value="30">30 FPS</option></select></label>
+          <label class="field"><span>Image Fit</span><select data-field="video_image_fit"><option value="cover">Fill Frame · Crop edges</option><option value="contain">Keep Full Image · Blurred fill</option></select></label>
+          <label class="field"><span>Encoding Quality</span><select data-field="video_quality"><option value="high">High · Slower final encode</option><option value="balanced">Balanced · Faster</option></select></label>
+          <label class="field"><span>Framing Note</span><select data-field="video_framing"><option value="upper">Upper body portrait</option><option value="head">Head and shoulders</option><option value="mid">Medium portrait</option></select></label>
+        </div>
+        <div class="long-video-note">
+          <strong>For 10–30 minute videos</strong>
+          <span>Continuous mode gives the cleanest motion continuity. Checkpointed mode renders separate sections near silence points, so a failed long job is easier to recover, but a small posture reset can appear between sections.</span>
+        </div>
+        <label class="video-consent-check"><input data-field="video_consent" type="checkbox"><span>I own this image or have clear permission to animate this person.</span></label>
+        <div class="video-primary-actions">
+          <button data-action="generate-video" class="button button-primary video-generate-button" type="button"><span>▶</span> Generate Video</button>
+          <button data-action="clear-video-jobs" class="button button-danger-soft" type="button">Clear Video History</button>
+          <span data-role="video-action-status" class="video-action-status">The TTS model is unloaded automatically while the avatar GPU is working.</span>
+        </div>
+      </section>
+
+      <section data-role="video-progress-card" class="video-progress-card hidden">
+        <div class="video-progress-header">
+          <div><span data-role="video-job-status" class="video-status-pill">Queued</span><h3 data-role="video-job-title">Avatar video</h3><p data-role="video-job-stage">Waiting for avatar GPU</p></div>
+          <button data-action="cancel-video" class="button button-secondary" type="button">Cancel</button>
+        </div>
+        <div class="video-progress-track"><span data-role="video-progress-bar"></span></div>
+        <div class="video-progress-meta"><span data-role="video-progress-percent">0%</span><span data-role="video-progress-time">Elapsed 0 sec</span><span data-role="video-progress-eta">ETA calculating...</span></div>
+      </section>
+
+      <section data-role="video-result-card" class="video-result-card hidden">
+        <div class="video-result-header">
+          <div><span class="section-eyebrow">Completed MP4</span><h3 data-role="video-result-title">Avatar video</h3><p data-role="video-result-summary"></p></div>
+          <a data-role="download-video" class="button button-primary" href="#" download>Download MP4</a>
+        </div>
+        <video data-role="video-result-player" class="video-result-player" controls playsinline preload="metadata"></video>
+        <div data-role="video-quality-report" class="video-quality-report"></div>
+        <p class="video-disclosure-note">Technical checks can catch duration drift and long frozen sections, but no system can guarantee that generated video will be indistinguishable from a camera recording. Review the complete video before publishing.</p>
+      </section>
+
+      <section class="video-history-card">
+        <div class="video-history-heading"><div><h3>Video History</h3><p>Completed and failed avatar jobs from this runtime.</p></div><button data-action="refresh-video-jobs" class="button button-secondary" type="button">Refresh</button></div>
+        <div data-role="video-history-list" class="video-history-list"><div class="empty-video-history">No avatar videos yet.</div></div>
+      </section>
+    </article>
+  </template>
+
+  <script src="/static/app.js?v=0.9.0" defer></script>
 </body>
 </html>

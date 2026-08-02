@@ -94,3 +94,35 @@ class OpenAITTSRequest(BaseModel):
     voice: str | None = None
     response_format: Literal["wav"] = "wav"
     speed: float = Field(1.0, ge=0.5, le=2.0)
+
+
+class VideoJobCreate(BaseModel):
+    title: str = Field("", max_length=180)
+    avatar_filename: str = Field(..., min_length=1, max_length=240)
+    audio_source: Literal["audio_job", "upload"] = "audio_job"
+    audio_job_id: str | None = None
+    audio_filename: str | None = None
+    engine: Literal["auto", "ditto_trt", "ditto_pytorch"] = "auto"
+    render_mode: Literal["continuous", "checkpointed"] = "continuous"
+    segment_seconds: int = Field(180, ge=60, le=600)
+    aspect_ratio: Literal["9:16", "16:9", "1:1"] = "9:16"
+    resolution: Literal["720p", "1080p"] = "1080p"
+    fps: Literal[25, 30] = 25
+    framing: Literal["head", "upper", "mid"] = "upper"
+    image_fit: Literal["cover", "contain"] = "cover"
+    quality: Literal["balanced", "high"] = "high"
+    consent: bool = False
+
+    @model_validator(mode="after")
+    def validate_video_source(self) -> "VideoJobCreate":
+        if self.audio_source == "audio_job" and not self.audio_job_id:
+            raise ValueError("Select a completed Audio workspace.")
+        if self.audio_source == "upload" and not self.audio_filename:
+            raise ValueError("Upload an audio file for the video.")
+        if not self.consent:
+            raise ValueError("Confirm that you own or have permission to animate the avatar image.")
+        return self
+
+
+class RemoveVideoJobsRequest(BaseModel):
+    delete_files: bool = True

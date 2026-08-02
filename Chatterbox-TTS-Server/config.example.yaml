@@ -14,6 +14,7 @@ storage:
   outputs_path: outputs
   data_path: data
   logs_path: logs
+  video_outputs_path: video_outputs
 
 generation_defaults:
   preset: Motivational Speech
@@ -30,3 +31,12 @@ generation_defaults:
   split_text: true
   chunk_words: 90
   output_format: wav
+
+
+avatar:
+  python: ''
+  ditto_dir: /content/ditto-talkinghead
+  ditto_checkpoints: /content/ditto-talkinghead/checkpoints
+  default_engine: auto
+  default_render_mode: continuous
+  default_segment_seconds: 180

@@ -7,7 +7,7 @@ def test_v060_defaults_to_one_removable_extra_tab() -> None:
     script = (ROOT / "ui" / "app.js").read_text(encoding="utf-8")
     assert "state.tabs = [defaultTab(1)];" in script
     assert "if (tab.number > 1)" in script
-    assert "softMetaChatterboxTabsV7" in script
+    assert "softMetaChatterboxTabsV9" in script
 
 
 def test_v060_candidate_players_are_stable_during_polling() -> None:
