@@ -1,103 +1,133 @@
 # SoftMeta Chatterbox TTS Server
 
-## v0.6.0 professional workspace and voice diversity update
+A self-hosted speech and long-form avatar studio maintained by **SoftMeta**.
+The server, persistent queues, browser UI, waveform editor, voice-candidate
+workflow and avatar orchestration are SoftMeta code.
 
-- Keeps generated candidate preview players stable while the queue polls in the background.
-- Starts with Audio 1 only; every added Audio 2–5 tab has a removable minus control.
-- Adds a clearer professional workspace layout, stronger visual hierarchy and responsive spacing.
-- Adds a direct **Chatterbox TTS API** link under API Docs.
-- Bundles five user-provided predefined American male WAV references.
-- Expands Qwen3-TTS voice identity families, age-conditioned vocal character and sampling variation.
-- Uses a stricter similarity threshold and prevents saving candidates marked too similar.
-- Automatically advances the variation seed after each successful candidate batch.
-- Use `colab/SoftMeta_Chatterbox_TTS_Colab_v0.6.0.ipynb`.
+## v0.9.1: A100 40GB Avatar installer hotfix
 
-
-## v0.5.2 model snapshot fix
-
-- Pins the complete official Qwen3-TTS VoiceDesign revision.
-- Uses a validated local model snapshot to avoid stale Hugging Face cache files.
-- Installs SoX for the isolated Qwen environment.
-- Use `colab/SoftMeta_Chatterbox_TTS_Colab_v0.6.0.ipynb`.
+- Repairs the missing Ditto installer error from the v0.9.0 GitHub tag.
+- Detects the common Colab A100 40GB GPU profile.
+- Defaults 10–30 minute videos to two-minute checkpointed sections.
+- Uses a lower internal working resolution on 40GB VRAM, then exports 720p or 1080p.
+- The notebook contains an embedded installer fallback, so the cell is not dependent on a repository script being present.
 
 
-## v0.5.1 hotfix
+The audio tab row now always places **Generate Video** after the last existing
+audio workspace:
 
-- Fixed the Qwen3-TTS Colab verification cell syntax error.
-- No engine, UI workflow, or voice-generation behaviour was changed.
-- Use `colab/SoftMeta_Chatterbox_TTS_Colab_v0.6.0.ipynb`.
+```text
+Audio 1 | Generate Video | +
+Audio 1 | Audio 2 | Generate Video | +
+Audio 1 | Audio 2 | Audio 3 | Generate Video | +
+```
 
-A professional, self-hosted speech studio maintained by **SoftMeta**. The server,
-queue, browser UI, waveform tools and audio editor are SoftMeta code. Chatterbox
-inference uses the official MIT-licensed Chatterbox package from Resemble AI
-through `soft-meta/chatterbox-v2`.
+The button therefore moves to the right when Audio 2, Audio 3, Audio 4 or Audio
+5 is added. Audio 1 remains the only default workspace.
 
-## v0.5.0 highlights
+### Complete Avatar Talking workflow
 
-### Qwen3-TTS Unique Voice Designer
+- Upload a permitted PNG, JPG or WebP portrait
+- Use any completed Audio 1–5 result without downloading and uploading it again
+- Or upload a separate WAV, MP3, M4A, FLAC, OGG or AAC file
+- Render through an isolated Ditto TensorRT worker on A100
+- Automatically fall back to the official Ditto PyTorch checkpoint
+- Choose 9:16, 16:9 or 1:1 output
+- Choose portrait framing, image fit, 720p or 1080p delivery and 25 or 30 fps
+- Use continuous rendering for maximum visual continuity
+- Use checkpointed rendering for restart-friendly 10–30 minute jobs
+- Split checkpointed jobs near natural audio silence rather than fixed hard cuts
+- Persist video jobs and progress across page refreshes
+- Cancel safely, inspect logs, preview the result and download the MP4
+- Preserve the original full-quality audio in the final H.264/AAC file
+- Run duration-drift and long-freeze technical checks after rendering
+- Automatically unload the TTS model before avatar rendering and restore it after
+  the video finishes, preventing the two GPU workloads from competing
 
-- Replaces Parler-TTS with the official Qwen3-TTS VoiceDesign model
-- Generates 2, 3 or 4 new fictional voice candidates in one request
-- Explicit speaker age, male/female gender, US English and General American accent
-- Age-aware cadence based on phrase length, thought pauses and breathing
-- Does **not** globally slow or stretch the generated reference audio
-- Varies pitch, resonance, texture, articulation, personality and cadence by seed
-- Preview and download every candidate before saving
-- Save only the selected candidate as a reusable Chatterbox reference voice
-- Optional SpeechBrain ECAPA speaker-difference check against saved generated voices
-- Candidate metadata, prompt, seed and optional embedding are saved with the voice
+No avatar model can guarantee that every viewer will believe a generated video
+is a camera recording. Use clear source images, review the entire output, and
+regenerate any segment with unnatural eyes, teeth, lips, hair or background
+motion.
 
-The Voice Designer does not imitate a named real person. Age and identity are
-model-generated approximations, so listen before saving.
+## v0.8.0: MOSS unique voice generation
 
-### Multi-audio studio
+The **Generate Voice** workflow uses `OpenMOSS-Team/MOSS-VoiceGenerator`:
 
-- Audio 1 and Audio 2 by default, expandable to Audio 5
-- Separate title, script, voice and settings per workspace
-- Generate one audio or schedule all prepared workspaces with **Generate All**
-- Sequential server-side GPU queue for stable L4 use
-- Queue Monitor with live words, percentage, elapsed time, ETA and audio duration
-- Preview and download completed audio while the next job is running
-- Remove All and removable Audio 3–5 tabs
+- Creates fictional American speaker timbres from text instructions
+- Builds speaker identity before age, emotion and delivery style
+- Does not globally slow audio or stretch words to imitate age
+- Over-generates and screens candidates for identity repetition and audio quality
+- Saves the selected candidate as a reusable Chatterbox reference voice
 
-### Generated audio tools
+## Other studio features
 
-- Main waveform with live playhead and time display
-- Browser audio fallback if waveform drawing fails
-- Start and End selection, zoom, fit, wheel scroll and drag-to-pan
-- Preview Selected, Download Selected, Part One and Part Two
-- Original generated WAV remains unchanged
+- Audio 1 only by default; add removable Audio 2–5 workspaces
+- Sequential audio queue with Generate All and Queue Monitor
+- Stable generated-voice preview players
+- Five bundled predefined American male voices
+- Import additional predefined or cloning WAV files
+- Main waveform, live playhead, zoom, pan and audio cutter
+- Download full audio, selected audio, Part One or Part Two
+- FastAPI documentation at `/docs`
+- Responsive light and dark interface
 
 ## Repository relationship
 
 ```text
 soft-meta/chatterbox-v2@v0.2.1
         ↓
-soft-meta/Chatterbox-TTS-Server@v0.6.0
+soft-meta/Chatterbox-TTS-Server@v0.9.1
         ↓
-Google Colab L4, local Python or Docker
+Chatterbox + MOSS VoiceGenerator + isolated Ditto avatar worker
 ```
 
 This project has no runtime dependency on Devnen repositories.
 
-## Google Colab
+## Google Colab A100
 
-Open `colab/SoftMeta_Chatterbox_TTS_Colab_v0.6.0.ipynb`, select an L4 GPU and
-run all cells. The notebook creates two isolated environments:
+Open `colab/SoftMeta_Chatterbox_TTS_Colab_v0.9.1.ipynb`, select an **A100 GPU**
+and run all cells. The notebook creates three isolated environments:
 
-- Chatterbox main server environment
-- Qwen3-TTS VoiceDesign environment
+- Python 3.11 Chatterbox server environment
+- Python 3.12 MOSS VoiceGenerator environment
+- Python 3.10 Ditto avatar environment
 
-The first Generate Voice request downloads the Qwen3-TTS VoiceDesign model.
+The first setup downloads several gigabytes of voice and avatar checkpoints.
+Long video generation can take substantial time and storage even on A100.
 
-## Local installation
+## Local avatar installation
 
-Python 3.11 and compatible PyTorch/CUDA installations are recommended. Use a
-separate Python environment for `requirements-voice.txt` and set
-`SOFTMETA_VOICE_PYTHON` to that environment's Python executable.
+After preparing the main server and micromamba, run:
+
+```bash
+bash scripts/install_ditto_a100.sh /path/to/micromamba
+```
+
+Then export the paths printed by the script:
+
+```text
+SOFTMETA_AVATAR_PYTHON=/path/to/avatar310/bin/python
+SOFTMETA_DITTO_DIR=/path/to/ditto-talkinghead
+SOFTMETA_DITTO_CHECKPOINTS=/path/to/ditto-talkinghead/checkpoints
+```
+
+## Docker
+
+The main container intentionally does not bake the very large Ditto checkpoints
+into the image. Mount an externally prepared Ditto directory and avatar Python
+environment, or run the avatar worker on the GPU host. See
+`docs/AVATAR_TALKING.md`.
+
+## Rights and disclosure
+
+Use only avatar images and reference voices that you own or have permission to
+use. Do not present a fictional avatar as a real named person. Follow platform
+rules that require synthetic-media disclosure.
 
 ## Licence
 
-SoftMeta server and UI code are MIT licensed. Chatterbox remains MIT licensed by
-Resemble AI. Qwen3-TTS and SpeechBrain are Apache-2.0 licensed. See
-`THIRD_PARTY_NOTICES.md`.
+SoftMeta server and UI code are MIT licensed. Chatterbox is MIT licensed. MOSS
+VoiceGenerator and Ditto code are open source under their upstream licences.
+Ditto's published checkpoint bundle contains third-party face-analysis assets
+whose commercial terms require separate review. Read `THIRD_PARTY_NOTICES.md`
+before monetized deployment.

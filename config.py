@@ -27,6 +27,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "outputs_path": "outputs",
         "data_path": "data",
         "logs_path": "logs",
+        "video_outputs_path": "video_outputs",
+    },
+    "avatar": {
+        "python": "",
+        "ditto_dir": "/content/ditto-talkinghead",
+        "ditto_checkpoints": "/content/ditto-talkinghead/checkpoints",
+        "default_engine": "auto",
+        "default_render_mode": "checkpointed",
+        "default_segment_seconds": 120,
     },
     "generation_defaults": {
         "preset": "Motivational Speech",
@@ -74,6 +83,12 @@ def load_config() -> dict[str, Any]:
         config["tts_engine"]["device"] = os.environ["SOFTMETA_DEVICE"]
     if os.getenv("SOFTMETA_MODEL"):
         config["tts_engine"]["default_model"] = os.environ["SOFTMETA_MODEL"]
+    if os.getenv("SOFTMETA_AVATAR_PYTHON"):
+        config["avatar"]["python"] = os.environ["SOFTMETA_AVATAR_PYTHON"]
+    if os.getenv("SOFTMETA_DITTO_DIR"):
+        config["avatar"]["ditto_dir"] = os.environ["SOFTMETA_DITTO_DIR"]
+    if os.getenv("SOFTMETA_DITTO_CHECKPOINTS"):
+        config["avatar"]["ditto_checkpoints"] = os.environ["SOFTMETA_DITTO_CHECKPOINTS"]
     return config
 
 

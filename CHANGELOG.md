@@ -1,5 +1,57 @@
 # Changelog
 
+## v0.9.1
+
+- Fixed the Colab failure when `scripts/install_ditto_a100.sh` was absent from the GitHub tag
+- Added an embedded installer fallback inside the notebook
+- Added A100 40GB VRAM detection and safer working resolutions
+- Made checkpointed rendering with two-minute sections the long-video default
+- Automatically protects continuous jobs longer than five minutes on 40GB GPUs
+- Added GPU profile, effective render mode and generation size to video results
+- Updated server, notebook and UI cache keys to v0.9.1
+
+## v0.9.0
+
+- Added a Generate Video tab that always follows the last current Audio workspace
+- Added avatar image and separate audio upload storage
+- Added direct completed Audio 1–5 selection for video creation
+- Added an isolated A100 Ditto TensorRT/PyTorch worker
+- Added continuous and silence-aware checkpointed long-video rendering
+- Added a persistent video queue with progress, ETA, cancellation and logs
+- Added portrait, landscape and square video delivery settings
+- Added final H.264/AAC encoding with original-audio restoration
+- Added duration-drift and long-freeze technical quality checks
+- Added Avatar Talking API endpoints, documentation and Colab installer
+- Updated server, UI cache keys and release references to v0.9.0
+
+## v0.8.0
+
+- Replaced Qwen3-TTS VoiceDesign with official MOSS VoiceGenerator as the primary Generate Voice engine
+- Added a pinned and validated MOSS model snapshot with an isolated Python 3.12 Colab environment
+- Rebuilt voice instructions around compact identity-first MOSS prompts
+- Added broader American speech backgrounds and protected low, medium and high pitch diversity at every age
+- Added explicit guidance against global slowdown, stretched vowels and fixed stop-start pauses
+- Added acoustic quality screening for dead air, clipping, active speech level, dynamics and age-aware pause behaviour
+- Added Naturalness score and acoustic diagnostics to candidate cards
+- Added separate duplicate-identity and low-quality rejection counters
+- Preserved up to 12 internal attempts, ECAPA pairwise comparison and automatic duplicate rejection
+- Kept Chatterbox as the long-form cloning engine for selected generated voices
+- Updated server, UI cache keys, Docker and Colab release references to v0.8.0
+
+## v0.7.0
+
+- Added identity-first speaker prompting so a new human identity is established before age and emotion
+- Added stable identity codes and expanded vocal anatomy, spectral colour, nasality, vowel, consonant and speaking-habit dimensions
+- Added strict over-generation: up to 12 attempts are searched to fill the requested 1–4 candidate slots
+- Added immediate SpeechBrain comparison against saved voices and every earlier attempt in the current batch
+- Added automatic rejection of candidates above the speaker-similarity threshold
+- Added review fallback only when the strict search cannot fill all requested slots
+- Replaced first-candidate “100% different” output with a truthful baseline status
+- Changed the UI to show closest speaker similarity instead of a misleading difference percentage
+- Added comparison count, identity code and richer identity traits to every candidate card
+- Raised the default repeated-identity threshold from 0.68 to 0.72
+- Updated server, UI cache keys and Colab release references to v0.7.0
+
 ## v0.6.0
 
 - Fixed Qwen candidate preview players being rebuilt and stopped by background queue polling

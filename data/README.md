@@ -1,3 +1,5 @@
-# data
+# Runtime data
 
-Runtime files for `data` are stored here and ignored by Git.
+Persistent audio and video queue metadata, uploaded avatar images, uploaded
+avatar audio and temporary video sections are stored below this directory and
+ignored by Git.
