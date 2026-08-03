@@ -1,0 +1,6 @@
+# Isolated LongCat Video Avatar 1.5 worker. The installer provisions its pinned runtime.
+# Versions follow the upstream A100 / Python 3.10 environment where practical.
+# The isolated avatar environment is installed from the official, pinned
+# LongCat-Video requirements files. This local file contains only the download
+# helper required by SoftMeta's selective model installer.
+huggingface_hub[hf_xet]>=0.34.0
