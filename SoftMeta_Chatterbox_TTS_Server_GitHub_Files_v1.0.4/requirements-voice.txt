@@ -1,0 +1,5 @@
+# Add-ons for the isolated MOSS VoiceGenerator environment.
+# MOSS-TTS owns torch, torchaudio, transformers and scipy through its official
+# [torch-runtime] extra. Do not override those packages here.
+speechbrain==1.1.0
+soundfile>=0.13.1,<0.14
