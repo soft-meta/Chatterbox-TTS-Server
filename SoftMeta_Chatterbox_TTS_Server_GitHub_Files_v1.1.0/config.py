@@ -27,15 +27,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "outputs_path": "outputs",
         "data_path": "data",
         "logs_path": "logs",
-        "video_outputs_path": "video_outputs",
-    },
-    "avatar": {
-        "python": "",
-        "echomimic_dir": "/content/EchoMimicV3",
-        "echomimic_models": "/content/echomimic_v3_models",
-        "default_engine": "auto",
-        "default_render_mode": "continuous",
-        "default_segment_seconds": 300,
     },
     "generation_defaults": {
         "preset": "Motivational Speech",
@@ -83,12 +74,6 @@ def load_config() -> dict[str, Any]:
         config["tts_engine"]["device"] = os.environ["SOFTMETA_DEVICE"]
     if os.getenv("SOFTMETA_MODEL"):
         config["tts_engine"]["default_model"] = os.environ["SOFTMETA_MODEL"]
-    if os.getenv("SOFTMETA_AVATAR_PYTHON"):
-        config["avatar"]["python"] = os.environ["SOFTMETA_AVATAR_PYTHON"]
-    if os.getenv("SOFTMETA_ECHOMIMIC_DIR"):
-        config["avatar"]["echomimic_dir"] = os.environ["SOFTMETA_ECHOMIMIC_DIR"]
-    if os.getenv("SOFTMETA_ECHOMIMIC_MODELS"):
-        config["avatar"]["echomimic_models"] = os.environ["SOFTMETA_ECHOMIMIC_MODELS"]
     return config
 
 

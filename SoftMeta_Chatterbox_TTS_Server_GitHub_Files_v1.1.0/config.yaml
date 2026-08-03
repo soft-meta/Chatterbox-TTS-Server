@@ -12,7 +12,6 @@ storage:
   outputs_path: outputs
   data_path: data
   logs_path: logs
-  video_outputs_path: video_outputs
 generation_defaults:
   preset: Motivational Speech
   language: en
@@ -28,12 +27,3 @@ generation_defaults:
   split_text: true
   chunk_words: 90
   output_format: wav
-
-
-avatar:
-  python: ''
-  echomimic_dir: /content/EchoMimicV3
-  echomimic_models: /content/echomimic_v3_models
-  default_engine: auto
-  default_render_mode: continuous
-  default_segment_seconds: 300

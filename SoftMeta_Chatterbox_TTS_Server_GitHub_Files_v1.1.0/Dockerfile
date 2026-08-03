@@ -14,9 +14,5 @@ RUN python -m pip install --no-cache-dir -r requirements.txt \
     && /opt/softmeta-moss/bin/python -m pip install --no-cache-dir -r requirements-voice.txt
 ENV SOFTMETA_VOICE_PYTHON=/opt/softmeta-moss/bin/python
 ENV SOFTMETA_MOSS_MODEL_DIR=/models/moss_voice_generator
-# Avatar Talking uses a separately prepared Python 3.10 EchoMimicV3 environment.
-ENV SOFTMETA_AVATAR_PYTHON=/opt/softmeta-avatar/bin/python
-ENV SOFTMETA_ECHOMIMIC_DIR=/opt/EchoMimicV3
-ENV SOFTMETA_ECHOMIMIC_MODELS=/models/echomimic
 EXPOSE 8004
 CMD ["python", "start.py"]

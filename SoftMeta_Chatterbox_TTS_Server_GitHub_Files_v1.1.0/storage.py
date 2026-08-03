@@ -12,8 +12,6 @@ from config import ROOT, load_config
 from utils import resolve_inside
 
 AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".opus", ".aac"}
-IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
-VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm"}
 
 
 class Storage:
@@ -26,10 +24,6 @@ class Storage:
         self.data = ROOT / config["storage"]["data_path"]
         self.logs = ROOT / config["storage"]["logs_path"]
         self.voice_candidates = self.data / "voice_candidates"
-        self.avatar_images = self.data / "avatar_images"
-        self.video_audio = self.data / "video_audio"
-        self.video_work = self.data / "video_work"
-        self.video_outputs = ROOT / config["storage"].get("video_outputs_path", "video_outputs")
         for directory in (
             self.voices,
             self.references,
@@ -38,14 +32,9 @@ class Storage:
             self.data,
             self.logs,
             self.voice_candidates,
-            self.avatar_images,
-            self.video_audio,
-            self.video_work,
-            self.video_outputs,
         ):
             directory.mkdir(parents=True, exist_ok=True)
         self.jobs_file = self.data / "jobs.json"
-        self.video_jobs_file = self.data / "video_jobs.json"
         self._lock = RLock()
 
     def list_audio(self, directory: Path) -> list[dict[str, Any]]:
@@ -132,48 +121,6 @@ class Storage:
         except (OSError, json.JSONDecodeError):
             return {}
 
-
-    def avatar_image_path(self, filename: str) -> Path:
-        path = resolve_inside(self.avatar_images, filename)
-        if not path.is_file() or path.suffix.lower() not in IMAGE_EXTENSIONS:
-            raise FileNotFoundError(filename)
-        return path
-
-    def video_audio_path(self, filename: str) -> Path:
-        path = resolve_inside(self.video_audio, filename)
-        if not path.is_file() or path.suffix.lower() not in AUDIO_EXTENSIONS:
-            raise FileNotFoundError(filename)
-        return path
-
-    def video_output_path(self, filename: str) -> Path:
-        path = resolve_inside(self.video_outputs, filename)
-        if not path.is_file() or path.suffix.lower() not in VIDEO_EXTENSIONS:
-            raise FileNotFoundError(filename)
-        return path
-
-    def save_video_jobs(self, jobs: dict[str, dict[str, Any]]) -> None:
-        with self._lock:
-            temp = self.video_jobs_file.with_suffix(".tmp")
-            temp.write_text(json.dumps(jobs, indent=2, ensure_ascii=False), encoding="utf-8")
-            temp.replace(self.video_jobs_file)
-
-    def load_video_jobs(self) -> dict[str, dict[str, Any]]:
-        if not self.video_jobs_file.exists():
-            return {}
-        try:
-            data = json.loads(self.video_jobs_file.read_text(encoding="utf-8"))
-            return data if isinstance(data, dict) else {}
-        except (OSError, json.JSONDecodeError):
-            return {}
-
-    def delete_video_artifacts(self, filename: str, job_id: str | None = None) -> None:
-        try:
-            self.video_output_path(filename).unlink(missing_ok=True)
-        except FileNotFoundError:
-            pass
-        if job_id:
-            shutil.rmtree(self.video_work / job_id, ignore_errors=True)
-            (self.logs / f"avatar_{job_id}.log").unlink(missing_ok=True)
 
     def delete_output_artifacts(self, filename: str) -> None:
         path = self.output_path(filename)

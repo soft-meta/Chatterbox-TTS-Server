@@ -2,7 +2,6 @@
   'use strict';
 
   const MAX_TABS = 5;
-  const VIDEO_VIEW_ID = 'generate-video';
   const STORAGE_KEY = 'softMetaChatterboxTabsV10';
   const THEME_KEY = 'softMetaChatterboxTheme';
   const $ = (selector, root = document) => root.querySelector(selector);
@@ -13,31 +12,6 @@
     tabs: [],
     activeId: '',
     jobs: new Map(),
-    videoJobs: new Map(),
-    video: {
-      panel: null,
-      avatar_filename: '',
-      avatar_preview_url: '',
-      audio_mode: 'audio_job',
-      audio_job_id: '',
-      audio_filename: '',
-      audio_preview_url: '',
-      title: '',
-      engine: 'auto',
-      render_mode: 'continuous',
-      segment_seconds: 300,
-      native_resolution: '720p',
-      motion_style: 'natural',
-      motion_prompt: '',
-      aspect_ratio: '9:16',
-      resolution: '1080p',
-      fps: 25,
-      framing: 'upper',
-      image_fit: 'cover',
-      quality: 'high',
-      consent: false,
-      active_job_id: null,
-    },
     pollTimer: null,
     modelPollTimer: null,
     monitorMinimised: false,
@@ -189,8 +163,7 @@
 
   function saveTabs() {
     const tabs = state.tabs.map(({ panel, waveform, generated_voice_candidates, generated_voice_session_id, ...tab }) => tab);
-    const { panel, ...video } = state.video;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ tabs, activeId: state.activeId, video }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ tabs, activeId: state.activeId }));
   }
 
   function restoreTabs() {
@@ -204,10 +177,7 @@
           panel: null,
           waveform: null,
         }));
-        state.activeId = saved.activeId === VIDEO_VIEW_ID || state.tabs.some(tab => tab.id === saved.activeId)
-          ? saved.activeId
-          : state.tabs[0].id;
-        if (saved.video && typeof saved.video === 'object') state.video = { ...state.video, ...saved.video, panel: null };
+        state.activeId = state.tabs.some(tab => tab.id === saved.activeId) ? saved.activeId : state.tabs[0].id;
         return;
       }
     } catch (_) {
@@ -219,10 +189,6 @@
 
   function currentTab() {
     return state.tabs.find(tab => tab.id === state.activeId) || null;
-  }
-
-  function videoActive() {
-    return state.activeId === VIDEO_VIEW_ID;
   }
 
   function findTabByJob(jobId) {
@@ -250,7 +216,6 @@
       button.dataset.tabId = tab.id;
       button.addEventListener('click', () => {
         captureTab(currentTab());
-        captureVideoState();
         state.activeId = tab.id;
         renderActive();
         saveTabs();
@@ -279,18 +244,6 @@
       panels.append(panel);
     });
 
-    const videoButton = document.createElement('button');
-    videoButton.className = 'audio-tab video-workspace-tab';
-    videoButton.type = 'button';
-    videoButton.dataset.tabId = VIDEO_VIEW_ID;
-    videoButton.innerHTML = '<span class="video-tab-icon">▶</span> Generate Video';
-    videoButton.addEventListener('click', () => {
-      captureTab(currentTab());
-      state.activeId = VIDEO_VIEW_ID;
-      renderActive();
-      saveTabs();
-    });
-    bar.append(videoButton);
 
     if (state.tabs.length < MAX_TABS) {
       const add = document.createElement('button');
@@ -303,10 +256,6 @@
       bar.append(add);
     }
 
-    const videoPanel = $('#video-panel-template').content.firstElementChild.cloneNode(true);
-    state.video.panel = videoPanel;
-    wireVideoPanel();
-    panels.append(videoPanel);
     renderActive();
   }
 
@@ -355,11 +304,6 @@
       const tab = state.tabs.find(item => item.id === button.dataset.tabId);
       button.classList.toggle('active', button.dataset.tabId === state.activeId);
       button.classList.remove('status-running', 'status-queued', 'status-completed', 'status-failed');
-      if (button.dataset.tabId === VIDEO_VIEW_ID) {
-        const job = activeVideoJob();
-        if (job?.status) button.classList.add(`status-${job.status}`);
-        return;
-      }
       const job = tab?.job_id ? state.jobs.get(tab.job_id) : null;
       if (job?.status) button.classList.add(`status-${job.status}`);
     });
@@ -367,15 +311,7 @@
     state.tabs.forEach(tab => {
       tab.panel.classList.toggle('hidden', tab.id !== state.activeId);
       if (tab.id === state.activeId) fillPanel(tab);
-    });
-    if (state.video.panel) {
-      state.video.panel.classList.toggle('hidden', !videoActive());
-      if (videoActive()) {
-        fillVideoPanel();
-        renderVideoHistory();
-      }
-    }
-  }
+    });  }
 
   function updateSliderOutput(panel, name) {
     const input = field(panel, name);
@@ -1091,21 +1027,16 @@
 
   async function refreshJobs() {
     try {
-      const [jobs, videoJobs] = await Promise.all([api('/api/jobs'), api('/api/video/jobs')]);
+      const jobs = await api('/api/jobs');
       state.jobs = new Map(jobs.map(job => [job.id, job]));
-      state.videoJobs = new Map(videoJobs.map(job => [job.id, job]));
       state.tabs.forEach(tab => {
         const job = tab.job_id ? state.jobs.get(tab.job_id) : null;
         if (job?.status === 'completed') showGenerated(tab, job);
       });
-      renderVideoAudioOptions();
-      renderCurrentVideoJob();
-      renderVideoHistory();
       renderActive();
       renderQueue();
       updateFloating();
-      const active = jobs.some(job => ['queued', 'running'].includes(job.status))
-        || videoJobs.some(job => ['queued', 'running'].includes(job.status));
+      const active = jobs.some(job => ['queued', 'running'].includes(job.status));
       schedulePoll(active ? 750 : 3000);
     } catch (error) {
       schedulePoll(3000);
@@ -1592,477 +1523,6 @@
   }
 
 
-  function videoField(name) {
-    return state.video.panel?.querySelector(`[data-field="${name}"]`);
-  }
-
-  function activeVideoJob() {
-    if (state.video.active_job_id && state.videoJobs.has(state.video.active_job_id)) {
-      return state.videoJobs.get(state.video.active_job_id);
-    }
-    return [...state.videoJobs.values()]
-      .sort((a, b) => (b.created_at || 0) - (a.created_at || 0))[0] || null;
-  }
-
-  function captureVideoState() {
-    const panel = state.video.panel;
-    if (!panel) return;
-    const values = {
-      title: 'video_title',
-      audio_job_id: 'video_audio_job_id',
-      engine: 'video_engine',
-      render_mode: 'video_render_mode',
-      segment_seconds: 'video_segment_seconds',
-      native_resolution: 'video_native_resolution',
-      motion_style: 'video_motion_style',
-      motion_prompt: 'video_motion_prompt',
-      aspect_ratio: 'video_aspect_ratio',
-      resolution: 'video_resolution',
-      fps: 'video_fps',
-      image_fit: 'video_image_fit',
-      quality: 'video_quality',
-      framing: 'video_framing',
-    };
-    Object.entries(values).forEach(([key, fieldName]) => {
-      const input = videoField(fieldName);
-      if (!input) return;
-      state.video[key] = ['segment_seconds', 'fps'].includes(key) ? Number(input.value) : input.value;
-    });
-    state.video.consent = Boolean(videoField('video_consent')?.checked);
-  }
-
-  function fillVideoPanel() {
-    const panel = state.video.panel;
-    if (!panel) return;
-    const values = {
-      video_title: state.video.title,
-      video_engine: state.video.engine,
-      video_render_mode: state.video.render_mode,
-      video_segment_seconds: state.video.segment_seconds,
-      video_native_resolution: state.video.native_resolution,
-      video_motion_style: state.video.motion_style,
-      video_motion_prompt: state.video.motion_prompt,
-      video_aspect_ratio: state.video.aspect_ratio,
-      video_resolution: state.video.resolution,
-      video_fps: state.video.fps,
-      video_image_fit: state.video.image_fit,
-      video_quality: state.video.quality,
-      video_framing: state.video.framing,
-    };
-    Object.entries(values).forEach(([name, value]) => {
-      const input = videoField(name);
-      if (input && value !== undefined) input.value = value;
-    });
-    if (videoField('video_consent')) videoField('video_consent').checked = Boolean(state.video.consent);
-    renderAvatarAsset();
-    setVideoAudioMode(state.video.audio_mode, false);
-    renderVideoAudioOptions();
-    renderVideoEngineStatus(state.initial?.avatar);
-    renderCurrentVideoJob();
-  }
-
-  function renderAvatarAsset() {
-    const panel = state.video.panel;
-    if (!panel) return;
-    const preview = panel.querySelector('[data-role="avatar-preview"]');
-    const placeholder = panel.querySelector('[data-role="avatar-placeholder"]');
-    const filename = panel.querySelector('[data-role="avatar-filename"]');
-    const remove = panel.querySelector('[data-action="remove-avatar"]');
-    if (state.video.avatar_filename && state.video.avatar_preview_url) {
-      preview.src = `${state.video.avatar_preview_url}?v=${Date.now()}`;
-      preview.classList.remove('hidden');
-      placeholder.classList.add('hidden');
-      filename.textContent = state.video.avatar_filename;
-      remove.classList.remove('hidden');
-    } else {
-      preview.removeAttribute('src');
-      preview.classList.add('hidden');
-      placeholder.classList.remove('hidden');
-      filename.textContent = 'No avatar selected';
-      remove.classList.add('hidden');
-    }
-  }
-
-  function setVideoAudioMode(mode, persist = true) {
-    state.video.audio_mode = mode;
-    const panel = state.video.panel;
-    if (!panel) return;
-    $$('[data-video-audio-mode]', panel).forEach(button => {
-      button.classList.toggle('active', button.dataset.videoAudioMode === mode);
-    });
-    panel.querySelector('[data-role="video-generated-audio-tools"]').classList.toggle('hidden', mode !== 'audio_job');
-    panel.querySelector('[data-role="video-upload-audio-tools"]').classList.toggle('hidden', mode !== 'upload');
-    if (persist) saveTabs();
-  }
-
-  function completedAudioJobs() {
-    return [...state.jobs.values()]
-      .filter(job => job.status === 'completed' && job.output_filename)
-      .sort((a, b) => (a.audio_number || 0) - (b.audio_number || 0));
-  }
-
-  function renderVideoAudioOptions() {
-    const select = videoField('video_audio_job_id');
-    if (!select) return;
-    const selected = state.video.audio_job_id || select.value;
-    select.innerHTML = '';
-    const jobs = completedAudioJobs();
-    if (!jobs.length) {
-      select.add(new Option('No completed audio yet', ''));
-      select.disabled = true;
-    } else {
-      select.disabled = false;
-      jobs.forEach(job => {
-        const title = job.title || job.output_filename;
-        select.add(new Option(`Audio ${job.audio_number} · ${title}`, job.id));
-      });
-      select.value = jobs.some(job => job.id === selected) ? selected : jobs[0].id;
-      state.video.audio_job_id = select.value;
-    }
-    const help = state.video.panel?.querySelector('[data-role="video-audio-help"]');
-    if (help) help.textContent = jobs.length
-      ? `${jobs.length} completed audio ${jobs.length === 1 ? 'track is' : 'tracks are'} ready.`
-      : 'Complete an Audio workspace first, then it appears here automatically.';
-  }
-
-  function renderUploadedVideoAudio() {
-    const panel = state.video.panel;
-    if (!panel) return;
-    const player = panel.querySelector('[data-role="video-upload-audio-player"]');
-    const name = panel.querySelector('[data-role="video-audio-filename"]');
-    const remove = panel.querySelector('[data-action="remove-video-audio"]');
-    if (state.video.audio_filename && state.video.audio_preview_url) {
-      player.src = state.video.audio_preview_url;
-      player.classList.remove('hidden');
-      name.textContent = state.video.audio_filename;
-      remove.classList.remove('hidden');
-    } else {
-      player.pause();
-      player.removeAttribute('src');
-      player.classList.add('hidden');
-      name.textContent = 'No audio uploaded';
-      remove.classList.add('hidden');
-    }
-  }
-
-  function renderVideoEngineStatus(status) {
-    const box = state.video.panel?.querySelector('[data-role="avatar-engine-state"]');
-    if (!box) return;
-    const strong = box.querySelector('strong');
-    const small = box.querySelector('small');
-    const gpu = status?.gpu;
-    if (status?.ready) {
-      box.dataset.state = 'ready';
-      strong.textContent = 'Avatar engine ready';
-      small.textContent = `${gpu?.name || 'NVIDIA GPU'} · EchoMimicV3 Flash · 8-step TeaCache inference`;
-    } else {
-      box.dataset.state = 'error';
-      strong.textContent = 'Avatar engine not installed';
-      small.textContent = status?.message || 'Run the optional Avatar runtime cell in the Colab notebook.';
-    }
-  }
-
-  async function uploadAvatarImage(file) {
-    if (!file) return;
-    const form = new FormData();
-    form.append('file', file);
-    const status = state.video.panel.querySelector('[data-role="video-action-status"]');
-    status.textContent = 'Uploading and validating avatar image...';
-    try {
-      const data = await api('/api/video/avatar-upload', { method: 'POST', body: form });
-      state.video.avatar_filename = data.filename;
-      state.video.avatar_preview_url = data.preview_url;
-      renderAvatarAsset();
-      saveTabs();
-      toast('Avatar image uploaded.', 'success');
-      status.textContent = 'Avatar ready. Choose audio and video settings.';
-    } catch (error) {
-      toast(error.message, 'error');
-      status.textContent = error.message;
-    }
-  }
-
-  async function uploadVideoAudio(file) {
-    if (!file) return;
-    const form = new FormData();
-    form.append('file', file);
-    const status = state.video.panel.querySelector('[data-role="video-action-status"]');
-    status.textContent = 'Uploading video audio...';
-    try {
-      const data = await api('/api/video/audio-upload', { method: 'POST', body: form });
-      state.video.audio_filename = data.filename;
-      state.video.audio_preview_url = data.preview_url;
-      renderUploadedVideoAudio();
-      saveTabs();
-      toast('Video audio uploaded.', 'success');
-      status.textContent = 'Uploaded audio is ready.';
-    } catch (error) {
-      toast(error.message, 'error');
-      status.textContent = error.message;
-    }
-  }
-
-  function videoPayload() {
-    captureVideoState();
-    return {
-      title: state.video.title || 'Avatar Video',
-      avatar_filename: state.video.avatar_filename,
-      audio_source: state.video.audio_mode,
-      audio_job_id: state.video.audio_mode === 'audio_job' ? state.video.audio_job_id : null,
-      audio_filename: state.video.audio_mode === 'upload' ? state.video.audio_filename : null,
-      engine: state.video.engine,
-      render_mode: state.video.render_mode,
-      segment_seconds: Number(state.video.segment_seconds),
-      native_resolution: state.video.native_resolution,
-      motion_style: state.video.motion_style,
-      motion_prompt: state.video.motion_prompt,
-      aspect_ratio: state.video.aspect_ratio,
-      resolution: state.video.resolution,
-      fps: Number(state.video.fps),
-      framing: state.video.framing,
-      image_fit: state.video.image_fit,
-      quality: state.video.quality,
-      consent: Boolean(state.video.consent),
-    };
-  }
-
-  function validateVideoPayload(payload) {
-    if (!payload.avatar_filename) throw new Error('Upload an avatar image first.');
-    if (payload.audio_source === 'audio_job' && !payload.audio_job_id) throw new Error('Select a completed audio track.');
-    if (payload.audio_source === 'upload' && !payload.audio_filename) throw new Error('Upload an audio file.');
-    if (!payload.consent) throw new Error('Confirm that you own or have permission to animate the avatar image.');
-    if (!state.initial?.avatar?.ready) throw new Error('Avatar engine is not installed. Run the optional Avatar runtime cell in the Colab notebook.');
-  }
-
-  async function generateVideo() {
-    const button = state.video.panel.querySelector('[data-action="generate-video"]');
-    const status = state.video.panel.querySelector('[data-role="video-action-status"]');
-    try {
-      const payload = videoPayload();
-      validateVideoPayload(payload);
-      button.disabled = true;
-      status.textContent = 'Creating the avatar video job...';
-      const job = await api('/api/video/jobs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      state.videoJobs.set(job.id, job);
-      state.video.active_job_id = job.id;
-      saveTabs();
-      renderCurrentVideoJob();
-      renderVideoHistory();
-      renderActive();
-      toast('Avatar video added to the GPU queue.', 'success');
-      schedulePoll(250);
-    } catch (error) {
-      toast(error.message, 'error');
-      status.textContent = error.message;
-    } finally {
-      button.disabled = false;
-    }
-  }
-
-  function videoStatusLabel(status) {
-    return ({ queued: 'Queued', running: 'Generating', completed: 'Completed', failed: 'Failed', cancelled: 'Cancelled', interrupted: 'Interrupted' })[status] || status;
-  }
-
-  function renderCurrentVideoJob() {
-    const panel = state.video.panel;
-    if (!panel) return;
-    const job = activeVideoJob();
-    const progressCard = panel.querySelector('[data-role="video-progress-card"]');
-    const resultCard = panel.querySelector('[data-role="video-result-card"]');
-    if (!job) {
-      progressCard.classList.add('hidden');
-      resultCard.classList.add('hidden');
-      return;
-    }
-    state.video.active_job_id = job.id;
-    if (['queued', 'running'].includes(job.status)) {
-      progressCard.classList.remove('hidden');
-      resultCard.classList.add('hidden');
-      const pill = panel.querySelector('[data-role="video-job-status"]');
-      pill.textContent = videoStatusLabel(job.status);
-      pill.dataset.status = job.status;
-      panel.querySelector('[data-role="video-job-title"]').textContent = job.title || 'Avatar video';
-      panel.querySelector('[data-role="video-job-stage"]').textContent = job.stage || 'Working...';
-      panel.querySelector('[data-role="video-progress-bar"]').style.width = `${Math.max(0, Math.min(100, job.percent || 0))}%`;
-      panel.querySelector('[data-role="video-progress-percent"]').textContent = `${Math.round(job.percent || 0)}%`;
-      panel.querySelector('[data-role="video-progress-time"]').textContent = `Elapsed ${humanDuration(job.elapsed_seconds || 0)}`;
-      panel.querySelector('[data-role="video-progress-eta"]').textContent = `ETA ${humanDuration(job.eta_seconds)}`;
-      panel.querySelector('[data-action="cancel-video"]').disabled = false;
-      return;
-    }
-    progressCard.classList.toggle('hidden', !['failed', 'cancelled', 'interrupted'].includes(job.status));
-    if (!progressCard.classList.contains('hidden')) {
-      panel.querySelector('[data-role="video-job-status"]').textContent = videoStatusLabel(job.status);
-      panel.querySelector('[data-role="video-job-stage"]').textContent = job.error || job.stage || videoStatusLabel(job.status);
-      panel.querySelector('[data-role="video-progress-bar"]').style.width = `${Math.round(job.percent || 0)}%`;
-      panel.querySelector('[data-action="cancel-video"]').disabled = true;
-    }
-    if (job.status === 'completed') {
-      resultCard.classList.remove('hidden');
-      panel.querySelector('[data-role="video-result-title"]').textContent = job.title || job.output_filename;
-      panel.querySelector('[data-role="video-result-summary"]').textContent = `${job.backend_label || job.backend} · ${job.segments || 1} section${job.segments === 1 ? '' : 's'} · ${humanDuration(job.duration)}`;
-      const url = `/api/video/jobs/${job.id}/file`;
-      panel.querySelector('[data-role="video-result-player"]').src = url;
-      const download = panel.querySelector('[data-role="download-video"]');
-      download.href = `${url}?download=true`;
-      download.download = job.output_filename || 'avatar-video.mp4';
-      const report = job.quality_report || {};
-      const qualityBox = panel.querySelector('[data-role="video-quality-report"]');
-      qualityBox.dataset.state = report.passed ? 'passed' : 'review';
-      qualityBox.innerHTML = '';
-      const items = [
-        ['Technical status', report.passed ? 'Passed' : 'Review'],
-        ['Audio / video drift', `${Number(report.duration_drift || 0).toFixed(2)} sec`],
-        ['Long freeze time', `${Number(report.freeze_seconds || 0).toFixed(1)} sec`],
-        ['File size', `${((job.output_size || 0) / 1024 / 1024).toFixed(1)} MB`],
-      ];
-      items.forEach(([label, value]) => {
-        const item = document.createElement('div');
-        const small = document.createElement('small');
-        const strong = document.createElement('strong');
-        small.textContent = label;
-        strong.textContent = value;
-        item.append(small, strong);
-        qualityBox.append(item);
-      });
-    } else {
-      resultCard.classList.add('hidden');
-    }
-  }
-
-  async function cancelVideoJob() {
-    const job = activeVideoJob();
-    if (!job || !['queued', 'running'].includes(job.status)) return;
-    try {
-      const updated = await api(`/api/video/jobs/${job.id}/cancel`, { method: 'POST' });
-      state.videoJobs.set(updated.id, updated);
-      renderCurrentVideoJob();
-      toast('Video cancellation requested.', 'success');
-    } catch (error) {
-      toast(error.message, 'error');
-    }
-  }
-
-  function renderVideoHistory() {
-    const list = state.video.panel?.querySelector('[data-role="video-history-list"]');
-    if (!list) return;
-    const jobs = [...state.videoJobs.values()].sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
-    list.innerHTML = '';
-    if (!jobs.length) {
-      const empty = document.createElement('div');
-      empty.className = 'empty-video-history';
-      empty.textContent = 'No avatar videos yet.';
-      list.append(empty);
-      return;
-    }
-    jobs.slice(0, 20).forEach(job => {
-      const card = document.createElement('article');
-      card.className = 'video-history-item';
-      card.dataset.status = job.status;
-      const body = document.createElement('div');
-      const title = document.createElement('strong');
-      const meta = document.createElement('span');
-      title.textContent = job.title || 'Avatar video';
-      meta.textContent = `${videoStatusLabel(job.status)} · ${job.audio_label || 'audio'}${job.duration ? ` · ${humanDuration(job.duration)}` : ''}`;
-      body.append(title, meta);
-      const actions = document.createElement('div');
-      if (job.status === 'completed') {
-        const open = document.createElement('button');
-        open.type = 'button';
-        open.className = 'button button-secondary';
-        open.textContent = 'Open';
-        open.addEventListener('click', () => {
-          state.video.active_job_id = job.id;
-          renderCurrentVideoJob();
-          state.video.panel.querySelector('[data-role="video-result-card"]').scrollIntoView({ behavior: 'smooth', block: 'start' });
-        });
-        actions.append(open);
-      }
-      if (!['queued', 'running'].includes(job.status)) {
-        const remove = document.createElement('button');
-        remove.type = 'button';
-        remove.className = 'button button-danger-soft';
-        remove.textContent = 'Remove';
-        remove.addEventListener('click', async () => {
-          if (!confirm('Remove this video job and its generated MP4?')) return;
-          try {
-            await api(`/api/video/jobs/${job.id}?delete_file=true`, { method: 'DELETE' });
-            state.videoJobs.delete(job.id);
-            if (state.video.active_job_id === job.id) state.video.active_job_id = null;
-            renderVideoHistory();
-            renderCurrentVideoJob();
-            saveTabs();
-          } catch (error) { toast(error.message, 'error'); }
-        });
-        actions.append(remove);
-      }
-      card.append(body, actions);
-      list.append(card);
-    });
-  }
-
-  async function clearVideoJobs() {
-    if ([...state.videoJobs.values()].some(job => ['queued', 'running'].includes(job.status))) {
-      toast('Cancel or finish the active video before clearing history.', 'error');
-      return;
-    }
-    if (!confirm('Clear all video history and generated MP4 files?')) return;
-    try {
-      await api('/api/video/jobs', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ delete_files: true }) });
-      state.videoJobs.clear();
-      state.video.active_job_id = null;
-      renderVideoHistory();
-      renderCurrentVideoJob();
-      saveTabs();
-      toast('Video history cleared.', 'success');
-    } catch (error) { toast(error.message, 'error'); }
-  }
-
-  async function refreshVideoStatus() {
-    try {
-      state.initial.avatar = await api('/api/video/status');
-      renderVideoEngineStatus(state.initial.avatar);
-    } catch (_) {
-      // The shared polling loop will retry.
-    }
-  }
-
-  function wireVideoPanel() {
-    const panel = state.video.panel;
-    if (!panel) return;
-    const avatarInput = panel.querySelector('[data-role="avatar-upload"]');
-    avatarInput.addEventListener('change', () => uploadAvatarImage(avatarInput.files?.[0]));
-    panel.querySelector('[data-action="remove-avatar"]').addEventListener('click', () => {
-      state.video.avatar_filename = '';
-      state.video.avatar_preview_url = '';
-      avatarInput.value = '';
-      renderAvatarAsset();
-      saveTabs();
-    });
-    $$('[data-video-audio-mode]', panel).forEach(button => button.addEventListener('click', () => setVideoAudioMode(button.dataset.videoAudioMode)));
-    videoField('video_audio_job_id').addEventListener('change', event => { state.video.audio_job_id = event.target.value; saveTabs(); });
-    const audioInput = panel.querySelector('[data-role="video-audio-upload"]');
-    audioInput.addEventListener('change', () => uploadVideoAudio(audioInput.files?.[0]));
-    panel.querySelector('[data-action="remove-video-audio"]').addEventListener('click', () => {
-      state.video.audio_filename = '';
-      state.video.audio_preview_url = '';
-      audioInput.value = '';
-      renderUploadedVideoAudio();
-      saveTabs();
-    });
-    $$('[data-field^="video_"]', panel).forEach(input => input.addEventListener('change', () => { captureVideoState(); saveTabs(); }));
-    panel.querySelector('[data-action="generate-video"]').addEventListener('click', generateVideo);
-    panel.querySelector('[data-action="cancel-video"]').addEventListener('click', cancelVideoJob);
-    panel.querySelector('[data-action="clear-video-jobs"]').addEventListener('click', clearVideoJobs);
-    panel.querySelector('[data-action="refresh-video-jobs"]').addEventListener('click', async () => { await refreshJobs(); toast('Video history refreshed.', 'success'); });
-    renderUploadedVideoAudio();
-    fillVideoPanel();
-  }
-
   function initTheme() {
     const saved = localStorage.getItem(THEME_KEY);
     if (saved === 'dark') document.documentElement.classList.add('dark');
@@ -2101,8 +1561,6 @@
     restoreTabs();
     buildTabs();
     state.initial.jobs.forEach(job => state.jobs.set(job.id, job));
-    (state.initial.video_jobs || []).forEach(job => state.videoJobs.set(job.id, job));
-    renderVideoEngineStatus(state.initial.avatar);
     renderActive();
     renderQueue();
 
@@ -2118,7 +1576,6 @@
     });
 
     if (state.initial.engine.loading) refreshModelStatus();
-    refreshVideoStatus();
     schedulePoll(200);
   }
 
