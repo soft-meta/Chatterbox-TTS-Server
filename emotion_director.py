@@ -154,6 +154,9 @@ class EmotionAnalysis:
     by_tag: dict[str, int]
     placements: list[dict[str, Any]]
     mode: str = "Serious Senior Advisor"
+    avatar_window_words: int = 0
+    avatar_applied_count: int = 0
+    avatar_target_count: int = 0
 
     def public_summary(self, *, include_text: bool = True) -> dict[str, Any]:
         data: dict[str, Any] = {
@@ -169,6 +172,10 @@ class EmotionAnalysis:
             "retention_reset_count": sum(1 for item in self.placements if item.get("source") == "retention-reset"),
             "high_confidence_count": sum(1 for item in self.placements if float(item.get("confidence", 0.0)) >= 0.82),
             "medium_confidence_count": sum(1 for item in self.placements if 0.68 <= float(item.get("confidence", 0.0)) < 0.82),
+            "avatar_window_words": self.avatar_window_words,
+            "avatar_applied_count": self.avatar_applied_count,
+            "avatar_target_count": self.avatar_target_count,
+            "avatar_reset_count": sum(1 for item in self.placements if item.get("source") == "avatar-reset"),
         }
         if include_text:
             data["tagged_text"] = self.tagged_text
@@ -538,4 +545,265 @@ def analyze_serious_senior_advisor(text: str) -> EmotionAnalysis:
         manual_tags=manual_tags,
         by_tag=applied,
         placements=placements,
+    )
+
+
+
+def analyze_turbo_avatar_performance(
+    text: str,
+    *,
+    target_wpm: int = 148,
+    avatar_minutes: float = 5.0,
+) -> EmotionAnalysis:
+    """Front-load Turbo-native expression for the on-camera avatar window.
+
+    Original Chatterbox continues to use ``analyze_serious_senior_advisor`` unchanged.
+    Turbo starts from that conservative semantic plan, then adds only supported native
+    emotion tokens inside the first five-minute avatar zone when long flat stretches
+    remain. Semantic candidates are preferred; calm ``[narration]`` resets fill only
+    genuine spacing gaps. The tail stays deliberately calmer for B-roll narration.
+    """
+    base = analyze_serious_senior_advisor(text)
+    if base.total_words < 80:
+        base.mode = "Turbo Avatar Performance"
+        return base
+
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    sanitized = strip_turbo_tags(normalized)
+    lines = sanitized.split("\n")
+    total_words = count_words(sanitized)
+    avatar_window_words = min(total_words, max(0, int(round(max(target_wpm, 1) * max(avatar_minutes, 0.0)))))
+    if avatar_window_words <= 0:
+        return base
+
+    # Roughly one meaningful beat every 30-38 seconds at senior-advisor pace,
+    # capped at ten in the first five minutes. This is intentionally denser than the
+    # default Serious Senior Advisor plan but remains far below sentence-by-sentence acting.
+    # A full five-minute avatar window targets ten restrained beats, while shorter
+    # scripts scale down naturally. Using ceil here prevents a nominal 5-minute zone
+    # (about 740 words at 148 WPM) from stopping at nine cues and leaving a 60-70s
+    # flat pocket despite otherwise good semantic placements.
+    avatar_target = min(10, max(2, math.ceil(avatar_window_words / 78.0)))
+    total_cap = min(14, avatar_target + max(1, math.ceil(max(total_words - avatar_window_words, 0) / 240.0)))
+
+    sentence_map: dict[int, list[_Sentence]] = {}
+    flat_sentences: list[_Sentence] = []
+    word_cursor = 0
+    last_heading_end: int | None = None
+    for line_index, raw_line in enumerate(lines):
+        if is_heading(raw_line):
+            word_cursor += count_words(strip_turbo_tags(raw_line))
+            last_heading_end = word_cursor
+            continue
+        sentence_list: list[_Sentence] = []
+        for sentence_index, part in enumerate(_sentence_parts(raw_line)):
+            speech_words = count_words(strip_turbo_tags(part))
+            start = word_cursor
+            end = word_cursor + speech_words
+            sentence = _Sentence(
+                line_index=line_index,
+                sentence_index=sentence_index,
+                text=part,
+                start_word=start,
+                end_word=end,
+                after_heading_gap=None if last_heading_end is None else max(0, start - last_heading_end),
+            )
+            sentence_list.append(sentence)
+            flat_sentences.append(sentence)
+            word_cursor = end
+        if sentence_list:
+            sentence_map[line_index] = sentence_list
+
+    # Rebuild selected items from the conservative plan so its semantic decisions and
+    # calm tail remain intact. Then enrich only the first-five-minute Turbo zone.
+    selected: list[_Candidate] = []
+    by_key: dict[tuple[int, int], _Candidate] = {}
+    placement_positions = {(int(item.get("line", 0)) - 1, int(item.get("word_position", -1))): item for item in base.placements}
+    for sentence in flat_sentences:
+        item = placement_positions.get((sentence.line_index, sentence.start_word))
+        if not item:
+            continue
+        candidate = _Candidate(
+            sentence=sentence,
+            tag=str(item.get("tag") or "narration"),
+            score=max(2.0, float(item.get("confidence", 0.75)) * 4.0),
+            source=str(item.get("source") or "semantic"),
+        )
+        selected.append(candidate)
+        by_key[(sentence.line_index, sentence.sentence_index)] = candidate
+
+    # Reserve the requested first-five-minute capacity before enrichment. The default
+    # planner may spend most of its budget in the calmer tail; Turbo Avatar Performance
+    # intentionally reverses that priority for the user's on-camera opening.
+    tail_cap = max(0, total_cap - avatar_target)
+    front_seed = [item for item in selected if item.sentence.start_word < avatar_window_words]
+    tail_seed = [item for item in selected if item.sentence.start_word >= avatar_window_words]
+    if len(tail_seed) > tail_cap:
+        tail_seed = sorted(tail_seed, key=lambda item: (-item.score, item.sentence.start_word))[:tail_cap]
+        selected = front_seed + tail_seed
+        by_key = {(item.sentence.line_index, item.sentence.sentence_index): item for item in selected}
+
+    def front_items() -> list[_Candidate]:
+        return [item for item in selected if item.sentence.start_word < avatar_window_words]
+
+    def gap_ok(sentence: _Sentence, tag: str, *, min_gap: int = 48) -> bool:
+        pos = sentence.start_word
+        if pos < 14 or pos >= avatar_window_words:
+            return False
+        if sentence.after_heading_gap is not None and sentence.after_heading_gap < 8:
+            return False
+        if any(abs(pos - item.sentence.start_word) < min_gap for item in front_items()):
+            return False
+        if any(tag == item.tag and abs(pos - item.sentence.start_word) < 74 for item in front_items()):
+            return False
+        return True
+
+    # Prefer unused high-confidence semantic/key-emphasis moments before adding neutral
+    # resets. Earlier positions get a small boost because the avatar section is the
+    # retention-critical part of the user's workflow.
+    extras: list[_Candidate] = []
+    for index, sentence in enumerate(flat_sentences):
+        if sentence.start_word >= avatar_window_words or sentence.start_word < 14:
+            continue
+        if (sentence.line_index, sentence.sentence_index) in by_key:
+            continue
+        previous = flat_sentences[index - 1].text if index > 0 else ""
+        following = flat_sentences[index + 1].text if index + 1 < len(flat_sentences) else ""
+        tag, score = _score_sentence(sentence.text, previous, following)
+        source = "semantic"
+        emphasis_tag, emphasis_score = key_emphasis_for_sentence(sentence.text)
+        if emphasis_tag and emphasis_score > score:
+            tag, score, source = emphasis_tag, emphasis_score, "key-emphasis"
+        if not tag:
+            fallback_score = _fallback_narration_score(sentence)
+            if fallback_score > 0:
+                tag, score, source = "narration", fallback_score, "advice-fallback"
+        if not tag:
+            continue
+        candidate = _Candidate(sentence=sentence, tag=tag, score=score, source=source)
+        if _candidate_confidence(candidate) < 0.68:
+            continue
+        early_bonus = max(0.0, 0.35 * (1.0 - sentence.start_word / max(avatar_window_words, 1)))
+        candidate.score += early_bonus
+        extras.append(candidate)
+
+    for candidate in sorted(extras, key=lambda item: (-item.score, item.sentence.start_word)):
+        if len(front_items()) >= avatar_target or len(selected) >= total_cap:
+            break
+        if not gap_ok(candidate.sentence, candidate.tag):
+            continue
+        selected.append(candidate)
+        by_key[(candidate.sentence.line_index, candidate.sentence.sentence_index)] = candidate
+
+    # Guarantee the first 30 seconds are not an entirely flat establishing read when a
+    # safe sentence exists. Use narration rather than inventing a positive/surprised mood.
+    intro_limit = min(82, avatar_window_words)
+    if not any(item.sentence.start_word < intro_limit for item in front_items()) and len(selected) < total_cap:
+        eligible = [
+            sentence for sentence in flat_sentences
+            if 14 <= sentence.start_word < intro_limit
+            and 7 <= count_words(strip_turbo_tags(sentence.text)) <= 42
+            and not _CTA_RE.search(sentence.text)
+            and (sentence.after_heading_gap is None or sentence.after_heading_gap >= 8)
+        ]
+        if eligible:
+            chosen = min(eligible, key=lambda sentence: abs(sentence.start_word - 42))
+            reset = _Candidate(chosen, "narration", 2.25, "avatar-reset")
+            if gap_ok(chosen, "narration", min_gap=34):
+                selected.append(reset)
+                by_key[(chosen.line_index, chosen.sentence_index)] = reset
+
+    # Fill only genuine first-five-minute flat stretches. This keeps the average spacing
+    # around 30-40 seconds without fabricating happy/surprised emotion where the words
+    # do not support it.
+    attempted: set[int] = set()
+    while len(front_items()) < avatar_target and len(selected) < total_cap:
+        front = sorted(front_items(), key=lambda item: item.sentence.start_word)
+        anchors = [12] + [item.sentence.start_word for item in front] + [avatar_window_words]
+        gaps = [(right - left, left, right) for left, right in zip(anchors, anchors[1:])]
+        gap, left, right = max(gaps, key=lambda item: item[0])
+        if gap <= 86:
+            break
+        target = (left + right) // 2
+        if target in attempted:
+            break
+        attempted.add(target)
+        eligible = []
+        for sentence in flat_sentences:
+            if not (14 <= sentence.start_word < avatar_window_words):
+                continue
+            if (sentence.line_index, sentence.sentence_index) in by_key:
+                continue
+            clean = strip_turbo_tags(sentence.text).strip()
+            if _CTA_RE.search(clean) or not (7 <= count_words(clean) <= 42):
+                continue
+            if sentence.after_heading_gap is not None and sentence.after_heading_gap < 8:
+                continue
+            if not gap_ok(sentence, "narration", min_gap=46):
+                continue
+            eligible.append(sentence)
+        if not eligible:
+            break
+        chosen = min(eligible, key=lambda sentence: abs(sentence.start_word - target))
+        reset = _Candidate(chosen, "narration", 2.20, "avatar-reset")
+        selected.append(reset)
+        by_key[(chosen.line_index, chosen.sentence_index)] = reset
+
+    # If the enriched front pushed the plan over the global cap, keep every avatar beat
+    # and retain only the earliest/strongest calm-tail items. Original is unaffected.
+    if len(selected) > total_cap:
+        front = [item for item in selected if item.sentence.start_word < avatar_window_words]
+        tail = [item for item in selected if item.sentence.start_word >= avatar_window_words]
+        tail = sorted(tail, key=lambda item: (-item.score, item.sentence.start_word))[: max(0, total_cap - len(front))]
+        selected = front + tail
+
+    selected.sort(key=lambda item: item.sentence.start_word)
+    selected_lookup = {(item.sentence.line_index, item.sentence.sentence_index): item for item in selected}
+    counts = {tag: 0 for tag in AUTO_ALLOWED_TAGS}
+    for item in selected:
+        counts[item.tag] += 1
+
+    output_lines: list[str] = []
+    placements: list[dict[str, Any]] = []
+    for line_index, raw_line in enumerate(lines):
+        if is_heading(raw_line):
+            output_lines.append(raw_line)
+            continue
+        sentence_list = sentence_map.get(line_index)
+        if not sentence_list:
+            output_lines.append(raw_line)
+            continue
+        rendered: list[str] = []
+        for sentence in sentence_list:
+            chosen = selected_lookup.get((line_index, sentence.sentence_index))
+            if chosen:
+                rendered.append(f"[{chosen.tag}] {sentence.text}")
+                placements.append({
+                    "tag": chosen.tag,
+                    "label": _LABELS[chosen.tag],
+                    "source": chosen.source,
+                    "confidence": round(_candidate_confidence(chosen), 2),
+                    "word_position": sentence.start_word,
+                    "line": line_index + 1,
+                    "excerpt": sentence.text[:120],
+                    "avatar_zone": sentence.start_word < avatar_window_words,
+                })
+            else:
+                rendered.append(sentence.text)
+        output_lines.append(" ".join(rendered))
+
+    applied = {tag: count for tag, count in counts.items() if count}
+    avatar_applied = sum(1 for item in placements if item.get("avatar_zone"))
+    return EmotionAnalysis(
+        tagged_text="\n".join(output_lines).strip(),
+        total_words=total_words,
+        applied_count=sum(applied.values()),
+        protected_headings=base.protected_headings,
+        manual_tags=base.manual_tags,
+        by_tag=applied,
+        placements=placements,
+        mode="Turbo Avatar Performance",
+        avatar_window_words=avatar_window_words,
+        avatar_applied_count=avatar_applied,
+        avatar_target_count=avatar_target,
     )

@@ -4,7 +4,7 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
-from emotion_director import analyze_serious_senior_advisor, is_heading, strip_turbo_tags
+from emotion_director import analyze_serious_senior_advisor, analyze_turbo_avatar_performance, is_heading, strip_turbo_tags
 from models import AudioJobCreate, GenerationOptions
 from queue_manager import QueueManager
 from utils import count_words, prepare_american_english_tts_text, split_text
@@ -29,7 +29,7 @@ The good news is that small changes can help. Reading labels, spacing your drink
 
 
 def test_screenshot_style_295_word_script_gets_multiple_visible_tags() -> None:
-    result = analyze_serious_senior_advisor(SCREENSHOT_STYLE_SCRIPT)
+    result = analyze_turbo_avatar_performance(SCREENSHOT_STYLE_SCRIPT)
     assert 220 <= result.total_words <= 330
     assert result.protected_headings == 1
     assert 2 <= result.applied_count <= 4
@@ -70,7 +70,7 @@ def test_frontend_inserts_backend_tagged_text_and_reports_visible_counts() -> No
 
 
 def test_backend_recomputes_same_canonical_tagged_script_used_by_ui() -> None:
-    result = analyze_serious_senior_advisor(SCREENSHOT_STYLE_SCRIPT)
+    result = analyze_turbo_avatar_performance(SCREENSHOT_STYLE_SCRIPT)
 
     class DummyStorage:
         def __init__(self) -> None:

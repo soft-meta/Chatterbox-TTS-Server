@@ -15,7 +15,7 @@ import numpy as np
 import soundfile as sf
 
 from engine import EngineService
-from emotion_director import analyze_serious_senior_advisor, contains_turbo_tag, is_heading, strip_turbo_tags
+from emotion_director import analyze_serious_senior_advisor, analyze_turbo_avatar_performance, contains_turbo_tag, is_heading, strip_turbo_tags
 from models import AudioJobCreate
 from storage import Storage
 from utils import (
@@ -35,6 +35,7 @@ from professional_audio import (
     master_professional_voice,
     shape_professional_pauses,
     create_video_master_48k_stereo,
+    analyze_prosody_quality,
 )
 
 logger = logging.getLogger(__name__)
@@ -524,7 +525,11 @@ class QueueManager:
             request.preset == "Motivational Speech"
             and effective_options.get("model") in PROFESSIONAL_MODELS
         ):
-            emotion_analysis = analyze_serious_senior_advisor(request.text)
+            emotion_analysis = (
+                analyze_turbo_avatar_performance(request.text)
+                if effective_options.get("model") == "chatterbox-turbo"
+                else analyze_serious_senior_advisor(request.text)
+            )
             pronounced = prepare_pronunciation_text(emotion_analysis.tagged_text)
             generation_text = prepare_senior_clear_speech_text(pronounced)
             emotion_summary = emotion_analysis.public_summary(include_text=False)
@@ -713,6 +718,8 @@ class QueueManager:
                 heading_detector=is_heading,
                 retention_positions=retention_positions,
                 age_profile=str(options.get("senior_pace_profile", "70s")),
+                turbo_avatar_mode=model_name == "chatterbox-turbo",
+                avatar_window_words=int((job.get("emotion_summary") or {}).get("avatar_window_words") or 0),
             )
             chunks = [segment.text for segment in directed_segments]
         else:
@@ -1244,8 +1251,28 @@ class QueueManager:
             job["percent"] = 99.0
             job["remaining_percent"] = 1.0
             self._persist(force=True)
-            job["mastering_profile"] = await asyncio.to_thread(master_professional_voice, output_path)
+            if model_name == "chatterbox-turbo":
+                def _master_turbo() -> dict[str, Any]:
+                    try:
+                        return master_professional_voice(output_path, preserve_dynamics=True)
+                    except TypeError as error:
+                        # Keep test/custom monkeypatch compatibility with the old one-arg hook.
+                        if "preserve_dynamics" not in str(error):
+                            raise
+                        return master_professional_voice(output_path)
+                job["mastering_profile"] = await asyncio.to_thread(_master_turbo)
+            else:
+                # Original path stays byte-for-byte compatible with the v1.5.4 call shape.
+                job["mastering_profile"] = await asyncio.to_thread(master_professional_voice, output_path)
             job["quality_summary"] = summarize_quality(quality_reports, quality_retries)
+            if model_name == "chatterbox-turbo":
+                job["stage"] = "Checking Turbo prosody and avatar engagement"
+                job["prosody_summary"] = await asyncio.to_thread(
+                    analyze_prosody_quality,
+                    output_path,
+                    job.get("emotion_summary"),
+                    avatar_minutes=5.0,
+                )
 
             if bool(options.get("platform_assets", True)):
                 stem = Path(output_filename).stem

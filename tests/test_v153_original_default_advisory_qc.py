@@ -13,9 +13,9 @@ def _audio(words: int = 40, wpm: float = 150.0, sr: int = 24000) -> np.ndarray:
     return (0.06 * np.sin(2 * np.pi * 180 * t)).astype(np.float32)
 
 
-def test_original_is_default_everywhere() -> None:
-    assert DEFAULT_CONFIG["tts_engine"]["default_model"] == "chatterbox"
-    assert GenerationOptions().model == "chatterbox"
+def test_turbo_is_default_while_original_remains_available() -> None:
+    assert DEFAULT_CONFIG["tts_engine"]["default_model"] == "chatterbox-turbo"
+    assert GenerationOptions().model == "chatterbox-turbo"
 
 
 def test_asr_repetition_and_35_percent_mismatch_are_advisory_not_hard_failure() -> None:

@@ -4,7 +4,7 @@ server:
   auto_load_model: true
 tts_engine:
   device: auto
-  default_model: chatterbox
+  default_model: chatterbox-turbo
   predefined_voices_path: voices
   reference_audio_path: reference_audio
 storage:

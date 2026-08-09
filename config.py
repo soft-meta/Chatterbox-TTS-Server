@@ -18,7 +18,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "tts_engine": {
         "device": "auto",
-        "default_model": "chatterbox",
+        "default_model": "chatterbox-turbo",
         "predefined_voices_path": "voices",
         "reference_audio_path": "reference_audio",
     },

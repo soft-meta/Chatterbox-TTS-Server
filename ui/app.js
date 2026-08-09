@@ -100,7 +100,7 @@
 
   function shouldAutoEmotion(tab) {
     const model = $('#active-model')?.value || state.initial?.active_model || '';
-    return ['chatterbox-turbo', 'chatterbox'].includes(model)
+    return model === 'chatterbox-turbo'
       && tab?.preset === 'Motivational Speech'
       && countWords(tab?.text || '') >= 25;
   }
@@ -117,11 +117,14 @@
       return `0 tags inserted • calm narration kept • ${headingText}`;
     }
     const details = labels.length ? ` • ${labels.join(' • ')}` : '';
+    const avatarCount = Number(summary.avatar_applied_count || 0);
+    const avatarTarget = Number(summary.avatar_target_count || 0);
+    const avatarText = avatarCount ? ` • ${avatarCount}${avatarTarget ? `/${avatarTarget}` : ''} in first 5-min avatar zone` : '';
     const emphasis = Number(summary.key_emphasis_count || 0) > 0 ? ` • ${summary.key_emphasis_count} key emphasis` : '';
     const resets = Number(summary.retention_reset_count || 0) > 0 ? ` • ${summary.retention_reset_count} retention reset${summary.retention_reset_count === 1 ? '' : 's'}` : '';
     const confidence = Number(summary.high_confidence_count || 0) + Number(summary.medium_confidence_count || 0);
     const confidenceText = confidence ? ` • ${summary.high_confidence_count || 0} high-confidence` : '';
-    return `${summary.applied_count} tag${summary.applied_count === 1 ? '' : 's'} inserted into script${details}${emphasis}${resets}${confidenceText} • ${headingText} • synced for generation`;
+    return `${summary.applied_count} tag${summary.applied_count === 1 ? '' : 's'} inserted into script${details}${avatarText}${emphasis}${resets}${confidenceText} • ${headingText} • synced for Turbo generation`;
   }
 
   function renderEmotionStatus(tab, message = null) {
@@ -172,7 +175,7 @@
         const result = await api('/api/emotion/analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: snapshot }),
+          body: JSON.stringify({ text: snapshot, model: $('#active-model')?.value || 'chatterbox-turbo' }),
         });
         if (requestId !== state.emotionRequestSerial && tab.text !== snapshot) return;
         if (tab.text !== snapshot) return;
@@ -1116,7 +1119,9 @@
       const speaker = q.minimum_speaker_similarity == null ? 'speaker check fallback' : `min speaker similarity ${Number(q.minimum_speaker_similarity).toFixed(2)}`;
       const warningChunks = Number(q.warning_chunks || 0);
       const warningText = warningChunks ? ` • ${warningChunks} accepted with ASR warning` : '';
-      qualityBox.textContent = `Production QC • score ${q.average_score ?? '?'} • ${q.checked_chunks} chunks checked • ${q.retries} focused retries${warningText} • ${wer} • ${speaker}`;
+      const p = job.prosody_summary;
+      const prosodyText = p ? ` • Prosody ${p.score}/100 ${p.rating} • first 5m ${p.avatar_tags}/${p.avatar_target_tags} emotion beats • LRA ${p.lra_lu} LU • max emotion gap ${p.max_avatar_emotion_gap_seconds}s` : '';
+      qualityBox.textContent = `Production QC • score ${q.average_score ?? '?'} • ${q.checked_chunks} chunks checked • ${q.retries} focused retries${warningText} • ${wer} • ${speaker}${prosodyText}`;
     } else if (qualityBox) {
       qualityBox.classList.add('hidden');
     }

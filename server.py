@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from config import ROOT, load_config
 from engine import EngineService
-from emotion_director import analyze_serious_senior_advisor
+from emotion_director import analyze_serious_senior_advisor, analyze_turbo_avatar_performance
 from reference_quality import analyze_reference_voice
 from models import (
     AudioJobCreate,
@@ -33,7 +33,7 @@ from storage import AUDIO_EXTENSIONS, Storage
 from utils import safe_filename
 
 APP_NAME = "SoftMeta Chatterbox TTS Server"
-APP_VERSION = "1.5.4"
+APP_VERSION = "1.5.5"
 logger = logging.getLogger("softmeta.chatterbox")
 
 config = load_config()
@@ -47,13 +47,13 @@ MODELS = [
         "id": "chatterbox",
         "name": "Chatterbox Original (English)",
         "badge": "Original",
-        "description": "Default English narration engine. Uses Original CFG and Exaggeration controls with the full Professional Speech Pipeline.",
+        "description": "Original English engine retained unchanged for comparison. Turbo is the current production default.",
     },
     {
         "id": "chatterbox-turbo",
         "name": "Chatterbox Turbo (English)",
         "badge": "Turbo",
-        "description": "Optional faster English engine. Uses the same Professional Speech Pipeline when selected.",
+        "description": "Production default for senior narration with native emotion tags and the Turbo Avatar Performance pipeline.",
     },
     {
         "id": "chatterbox-nano",
@@ -238,8 +238,12 @@ def initial_data() -> dict[str, Any]:
 
 @app.post("/api/emotion/analyze")
 def analyze_emotion(request: EmotionAnalyzeRequest) -> dict[str, Any]:
-    """Preview the conservative emotion direction used by Original and Turbo."""
-    analysis = analyze_serious_senior_advisor(request.text)
+    """Preview the model-specific emotion plan used for generation."""
+    if request.model == "chatterbox-turbo":
+        analysis = analyze_turbo_avatar_performance(request.text)
+    else:
+        # Original stays on the existing v1.5.4 conservative planner.
+        analysis = analyze_serious_senior_advisor(request.text)
     return analysis.public_summary(include_text=True)
 
 

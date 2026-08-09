@@ -158,7 +158,7 @@ def test_ui_and_dependencies_expose_production_quality_for_original_and_turbo() 
     assert "Senior Listener Pace" in html
     assert "Video Master 48k" in html and "SRT" in html and "VTT" in html
     assert 'data-role="production-quality"' in html
-    assert "['chatterbox-turbo', 'chatterbox'].includes(model)" in app
+    assert "model === 'chatterbox-turbo'" in app
     assert '"models": ["chatterbox", "chatterbox-turbo"]' in server
     assert "faster-whisper==1.2.1" in req
     assert "speechbrain==1.1.0" in req
@@ -284,7 +284,7 @@ def test_original_preserves_user_cfg_and_exaggeration_while_sharing_quality_pipe
 
 
 def test_v150_colab_keeps_l4_and_verifies_qc_packages() -> None:
-    path = ROOT / "colab" / "SoftMeta_Chatterbox_TTS_Colab_v1.5.4.ipynb"
+    path = ROOT / "colab" / "SoftMeta_Chatterbox_TTS_Colab_v1.5.5.ipynb"
     notebook = json.loads(path.read_text(encoding="utf-8"))
     assert notebook["metadata"]["accelerator"] == "GPU"
     assert notebook["metadata"]["colab"]["gpuType"] == "L4"

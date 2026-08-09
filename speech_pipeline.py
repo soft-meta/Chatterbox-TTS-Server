@@ -300,6 +300,8 @@ def build_long_form_segments(
     heading_detector=None,
     retention_positions: list[int] | None = None,
     age_profile: str = "70s",
+    turbo_avatar_mode: bool = False,
+    avatar_window_words: int = 0,
 ) -> list[SpeechSegment]:
     """Create long-form TTS segments while preserving section structure.
 
@@ -370,12 +372,20 @@ def build_long_form_segments(
                 target_wpm = body_target + int(pace["intro_delta"])
                 pause_before = 0
             elif role == "emotion":
-                emotion_delta = {"narration": -4, "happy": 0, "surprised": -2, "dramatic": -6}.get(emotion_tag or "", -3)
-                target_wpm = body_target + emotion_delta
-                # Give native/model-controlled expression room to breathe. A wider
-                # pace band prevents atempo from flattening an intentional prosody cue.
-                band = max(band, 13)
-                pause_before = 150 if emotion_tag == "dramatic" else 115
+                if turbo_avatar_mode and (avatar_window_words <= 0 or start < avatar_window_words):
+                    # The on-camera Turbo window needs audible but restrained contrast.
+                    # Keep warm/surprise moments slightly more alive and reflective/serious
+                    # moments more deliberate, while widening the band so atempo does not
+                    # iron the native tag performance back to one cadence.
+                    emotion_delta = {"narration": -6, "happy": 2, "surprised": 1, "dramatic": -8}.get(emotion_tag or "", -4)
+                    target_wpm = body_target + emotion_delta
+                    band = max(band, 16)
+                    pause_before = 175 if emotion_tag == "dramatic" else 95
+                else:
+                    emotion_delta = {"narration": -4, "happy": 0, "surprised": -2, "dramatic": -6}.get(emotion_tag or "", -3)
+                    target_wpm = body_target + emotion_delta
+                    band = max(band, 13)
+                    pause_before = 150 if emotion_tag == "dramatic" else 115
             elif importance:
                 target_wpm = body_target + int(pace["important_delta"])
                 pause_before = 300 if role != "section" else 520

@@ -143,7 +143,7 @@ def analyze_voice_mastering_profile(output_path: Path) -> dict[str, float | str]
     }
 
 
-def master_professional_voice(output_path: Path) -> dict[str, float | str]:
+def master_professional_voice(output_path: Path, *, preserve_dynamics: bool = False) -> dict[str, float | str]:
     """Voice-aware spoken-word mastering for social-video playback.
 
     The source voice is measured before mastering. Bright voices receive less presence
@@ -160,12 +160,25 @@ def master_professional_voice(output_path: Path) -> dict[str, float | str]:
     presence_gain = float(profile["presence_gain_db"])
     deesser = float(profile["deesser_intensity"])
     ratio = float(profile["compressor_ratio"])
+    if preserve_dynamics:
+        # Turbo's native emotion tags already create the useful performance movement.
+        # Use mastering as a safety/clarity stage, not as a dynamics eraser.
+        ratio = float(np.clip(ratio - 0.28, 1.24, 1.42))
+        compressor = (
+            f"acompressor=threshold=0.180:ratio={ratio:.2f}:attack=32:release=285:"
+            "makeup=1.02:knee=2.2:detection=rms"
+        )
+    else:
+        compressor = (
+            f"acompressor=threshold=0.125:ratio={ratio:.2f}:attack=24:release=220:"
+            "makeup=1.06:knee=2.5:detection=rms"
+        )
     tone_chain = (
         "highpass=f=70,"
         "equalizer=f=180:t=q:w=0.8:g=-0.8,"
         f"equalizer=f=3200:t=q:w=1.0:g={presence_gain:.2f},"
         f"deesser=i={deesser:.2f}:m=0.30:f=0.55,"
-        f"acompressor=threshold=0.125:ratio={ratio:.2f}:attack=24:release=220:makeup=1.06:knee=2.5:detection=rms"
+        + compressor
     )
     try:
         _run_ffmpeg([
@@ -202,6 +215,8 @@ def master_professional_voice(output_path: Path) -> dict[str, float | str]:
         out_path.replace(output_path)
         profile["target_lufs"] = PRO_FINAL_TARGET_LUFS
         profile["true_peak_dbfs"] = PRO_FINAL_TRUE_PEAK_DBFS
+        profile["preserve_dynamics"] = bool(preserve_dynamics)
+        profile["compressor_ratio_used"] = round(float(ratio), 2)
         return profile
     except (FileNotFoundError, subprocess.CalledProcessError, KeyError, ValueError, json.JSONDecodeError) as exc:
         raise RuntimeError("Professional voice mastering requires a working FFmpeg audio filter stack.") from exc
@@ -265,3 +280,153 @@ def apply_tempo_array(audio: np.ndarray, sample_rate: int, factor: float) -> np.
         raise RuntimeError("Adaptive senior pacing requires FFmpeg atempo.") from exc
     out = np.frombuffer(proc.stdout, dtype=np.float32).copy()
     return out if out.size else data.copy()
+
+
+
+def _measure_final_loudness(output_path: Path) -> dict[str, float]:
+    """Measure final loudness without modifying the file."""
+    base = f"loudnorm=I={PRO_FINAL_TARGET_LUFS:.1f}:TP={PRO_FINAL_TRUE_PEAK_DBFS:.1f}:LRA={PRO_FINAL_LRA:.1f}:print_format=json"
+    try:
+        measured = _run_ffmpeg([
+            "ffmpeg", "-hide_banner", "-nostats", "-loglevel", "info",
+            "-i", str(output_path), "-af", base, "-f", "null", "-",
+        ], capture=True)
+        stderr = measured.stderr or ""
+        start, end = stderr.rfind("{"), stderr.rfind("}")
+        if start < 0 or end <= start:
+            return {}
+        values = json.loads(stderr[start:end + 1])
+        return {
+            "integrated_lufs": float(values.get("input_i", -120.0)),
+            "true_peak_dbfs": float(values.get("input_tp", -120.0)),
+            "lra_lu": float(values.get("input_lra", 0.0)),
+        }
+    except (FileNotFoundError, subprocess.CalledProcessError, ValueError, json.JSONDecodeError):
+        return {}
+
+
+def analyze_prosody_quality(
+    output_path: Path,
+    emotion_summary: dict | None = None,
+    *,
+    avatar_minutes: float = 5.0,
+) -> dict[str, float | int | str]:
+    """Engineering heuristic for engagement movement in long-form spoken narration.
+
+    This is not a perceptual MOS or a medical/industry standard. It intentionally
+    complements Production QC by measuring the things that QC does not: front-loaded
+    emotion spacing, final loudness range, short-term energy movement, and long flat
+    stretches. It never rejects a job; it is an advisory score for tuning.
+    """
+    audio, sr = sf.read(output_path, dtype="float32", always_2d=False)
+    data = np.asarray(audio, dtype=np.float32)
+    if data.ndim > 1:
+        data = np.mean(data, axis=1)
+    data = np.nan_to_num(data.reshape(-1), nan=0.0, posinf=0.0, neginf=0.0)
+    duration = data.size / max(sr, 1)
+    if data.size == 0 or duration <= 0:
+        return {"score": 0.0, "rating": "unavailable", "duration_seconds": 0.0}
+
+    def window_rms_db(start_s: float, end_s: float, window_s: float = 3.0, step_s: float = 1.5) -> list[float]:
+        start = max(0, int(start_s * sr))
+        end = min(data.size, int(end_s * sr))
+        win = max(1, int(window_s * sr))
+        step = max(1, int(step_s * sr))
+        values: list[float] = []
+        pos = start
+        while pos + win <= end:
+            frame = data[pos:pos + win]
+            rms = float(np.sqrt(np.mean(np.square(frame, dtype=np.float64)) + 1e-12))
+            values.append(20.0 * math.log10(max(rms, 1e-6)))
+            pos += step
+        return values
+
+    loudness = _measure_final_loudness(output_path)
+    lra = float(loudness.get("lra_lu", 0.0))
+    avatar_seconds = min(duration, max(0.0, avatar_minutes * 60.0))
+    first_values = window_rms_db(0.0, avatar_seconds)
+    if first_values:
+        active_threshold = max(-44.0, float(np.percentile(first_values, 80)) - 22.0)
+        active = [v for v in first_values if v >= active_threshold]
+        first_rms_range = float(np.percentile(active, 90) - np.percentile(active, 10)) if len(active) >= 4 else 0.0
+    else:
+        first_rms_range = 0.0
+
+    # Longest nearly-flat active run in non-overlapping 5-second windows.
+    flat_values = window_rms_db(0.0, avatar_seconds, window_s=5.0, step_s=5.0)
+    longest_flat = 0.0
+    current_flat = 0.0
+    previous: float | None = None
+    for value in flat_values:
+        if value < -44.0:
+            current_flat = 0.0
+            previous = None
+            continue
+        if previous is not None and abs(value - previous) <= 0.45:
+            current_flat += 5.0
+        else:
+            current_flat = 5.0
+        longest_flat = max(longest_flat, current_flat)
+        previous = value
+
+    summary = emotion_summary or {}
+    placements = list(summary.get("placements") or [])
+    total_words = max(1, int(summary.get("total_words") or 1))
+    cue_times: list[float] = []
+    for item in placements:
+        try:
+            position = max(0, int(item.get("word_position", 0)))
+        except (TypeError, ValueError):
+            continue
+        estimated_time = duration * min(position / total_words, 1.0)
+        if estimated_time <= avatar_seconds + 1e-6:
+            cue_times.append(estimated_time)
+    cue_times = sorted(set(round(value, 3) for value in cue_times))
+    avatar_tag_count = len(cue_times)
+    avatar_target = max(1, int(summary.get("avatar_target_count") or min(10, max(2, round(total_words / 120)))))
+    anchors = [0.0] + cue_times + [avatar_seconds]
+    max_gap = max((b - a for a, b in zip(anchors, anchors[1:])), default=avatar_seconds)
+
+    emotion_points = 30.0 * min(avatar_tag_count / max(avatar_target, 1), 1.0)
+    if max_gap <= 45:
+        gap_points = 20.0
+    elif max_gap <= 60:
+        gap_points = 17.0
+    elif max_gap <= 75:
+        gap_points = 13.0
+    elif max_gap <= 100:
+        gap_points = 8.0
+    else:
+        gap_points = 3.0
+    if 4.0 <= lra <= 7.5:
+        lra_points = 25.0
+    elif lra > 7.5:
+        lra_points = max(17.0, 25.0 - (lra - 7.5) * 1.8)
+    else:
+        lra_points = 25.0 * min(max(lra, 0.0) / 4.0, 1.0)
+    movement_points = 15.0 * min(first_rms_range / 4.0, 1.0)
+    if longest_flat <= 35:
+        flat_points = 10.0
+    elif longest_flat <= 50:
+        flat_points = 8.0
+    elif longest_flat <= 70:
+        flat_points = 5.0
+    else:
+        flat_points = 2.0
+    score = float(np.clip(emotion_points + gap_points + lra_points + movement_points + flat_points, 0.0, 100.0))
+    rating = "excellent" if score >= 85 else "strong" if score >= 75 else "good" if score >= 65 else "needs more movement"
+    return {
+        "score": round(score, 1),
+        "rating": rating,
+        "duration_seconds": round(duration, 2),
+        "avatar_seconds": round(avatar_seconds, 2),
+        "avatar_tags": avatar_tag_count,
+        "avatar_target_tags": avatar_target,
+        "max_avatar_emotion_gap_seconds": round(max_gap, 1),
+        "lra_lu": round(lra, 2),
+        "first5_rms_range_db": round(first_rms_range, 2),
+        "longest_flat_stretch_seconds": round(longest_flat, 1),
+        "integrated_lufs": round(float(loudness.get("integrated_lufs", -120.0)), 2),
+        "true_peak_dbfs": round(float(loudness.get("true_peak_dbfs", -120.0)), 2),
+        "note": "Advisory engineering score; it does not reject audio.",
+    }

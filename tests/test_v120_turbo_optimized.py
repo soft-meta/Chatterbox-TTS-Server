@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_turbo_is_default_and_motivational_has_turbo_overrides() -> None:
-    assert DEFAULT_CONFIG["tts_engine"]["default_model"] == "chatterbox"
+    assert DEFAULT_CONFIG["tts_engine"]["default_model"] == "chatterbox-turbo"
     assert DEFAULT_CONFIG["generation_defaults"]["preset"] == "Motivational Speech"
     assert DEFAULT_CONFIG["generation_defaults"]["chunk_words"] == 85
     source = (ROOT / "server.py").read_text(encoding="utf-8")
@@ -36,7 +36,7 @@ def test_boxed_desktop_layout() -> None:
 
 
 def test_colab_is_tts_only_and_turbo_default() -> None:
-    notebook_path = ROOT / "colab" / "SoftMeta_Chatterbox_TTS_Colab_v1.5.4.ipynb"
+    notebook_path = ROOT / "colab" / "SoftMeta_Chatterbox_TTS_Colab_v1.5.5.ipynb"
     notebook = json.loads(notebook_path.read_text(encoding="utf-8"))
     text = notebook_path.read_text(encoding="utf-8")
     source = "\n".join("".join(cell.get("source", [])) for cell in notebook["cells"])
@@ -44,7 +44,7 @@ def test_colab_is_tts_only_and_turbo_default() -> None:
     assert "SOFTMETA_PATCH" not in text
     assert "INSTALL_MOSS_RUNTIME" not in text
     assert "moss312" not in text
-    assert '"SOFTMETA_MODEL": "chatterbox"' in source
+    assert '"SOFTMETA_MODEL": "chatterbox-turbo"' in source
 
 
 def test_generated_voice_mode_is_not_accepted() -> None:

@@ -13,7 +13,7 @@ ModelId = Literal[
 
 
 class GenerationOptions(BaseModel):
-    model: ModelId = "chatterbox"
+    model: ModelId = "chatterbox-turbo"
     language: str = "en"
     temperature: float = Field(0.8, ge=0.05, le=2.0)
     exaggeration: float = Field(0.65, ge=0.0, le=2.0)
@@ -56,6 +56,7 @@ class GenerateAllRequest(BaseModel):
 
 class EmotionAnalyzeRequest(BaseModel):
     text: str = Field(..., min_length=1)
+    model: ModelId = "chatterbox-turbo"
 
 
 class CutRequest(BaseModel):
@@ -74,7 +75,7 @@ class ModelLoadRequest(BaseModel):
 
 
 class OpenAITTSRequest(BaseModel):
-    model: str = "chatterbox"
+    model: str = "chatterbox-turbo"
     input: str
     voice: str | None = None
     response_format: Literal["wav"] = "wav"
