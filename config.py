@@ -21,37 +21,31 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "default_model": "chatterbox",
         "predefined_voices_path": "voices",
         "reference_audio_path": "reference_audio",
-        "generated_voices_path": "generated_voices",
     },
     "storage": {
         "outputs_path": "outputs",
         "data_path": "data",
         "logs_path": "logs",
-        "video_outputs_path": "video_outputs",
-    },
-    "avatar": {
-        "python": "",
-        "ditto_dir": "/content/ditto-talkinghead",
-        "ditto_checkpoints": "/content/ditto-talkinghead/checkpoints",
-        "default_engine": "auto",
-        "default_render_mode": "checkpointed",
-        "default_segment_seconds": 120,
     },
     "generation_defaults": {
         "preset": "Motivational Speech",
         "language": "en",
-        "temperature": 0.8,
-        "exaggeration": 0.65,
+        "temperature": 0.72,
+        "exaggeration": 0.58,
         "cfg_weight": 0.35,
-        "repetition_penalty": 1.2,
+        "repetition_penalty": 1.20,
         "min_p": 0.05,
         "top_p": 1.0,
         "top_k": 1000,
         "speed_factor": 1.0,
         "seed": 2025,
         "split_text": True,
-        "chunk_words": 90,
+        "chunk_words": 85,
         "output_format": "wav",
+        "senior_pace_profile": "70s",
+        "quality_gate": True,
+        "speaker_consistency": True,
+        "platform_assets": True,
     },
 }
 
@@ -83,12 +77,6 @@ def load_config() -> dict[str, Any]:
         config["tts_engine"]["device"] = os.environ["SOFTMETA_DEVICE"]
     if os.getenv("SOFTMETA_MODEL"):
         config["tts_engine"]["default_model"] = os.environ["SOFTMETA_MODEL"]
-    if os.getenv("SOFTMETA_AVATAR_PYTHON"):
-        config["avatar"]["python"] = os.environ["SOFTMETA_AVATAR_PYTHON"]
-    if os.getenv("SOFTMETA_DITTO_DIR"):
-        config["avatar"]["ditto_dir"] = os.environ["SOFTMETA_DITTO_DIR"]
-    if os.getenv("SOFTMETA_DITTO_CHECKPOINTS"):
-        config["avatar"]["ditto_checkpoints"] = os.environ["SOFTMETA_DITTO_CHECKPOINTS"]
     return config
 
 

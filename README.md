@@ -1,133 +1,76 @@
 # SoftMeta Chatterbox TTS Server
 
-A self-hosted speech and long-form avatar studio maintained by **SoftMeta**.
-The server, persistent queues, browser UI, waveform editor, voice-candidate
-workflow and avatar orchestration are SoftMeta code.
+Self-hosted long-form Chatterbox narration studio maintained by **SoftMeta**.
 
-## v0.9.1: A100 40GB Avatar installer hotfix
+## v1.5.3 Original-Default Production Quality
 
-- Repairs the missing Ditto installer error from the v0.9.0 GitHub tag.
-- Detects the common Colab A100 40GB GPU profile.
-- Defaults 10–30 minute videos to two-minute checkpointed sections.
-- Uses a lower internal working resolution on 40GB VRAM, then exports 720p or 1080p.
-- The notebook contains an embedded installer fallback, so the cell is not dependent on a repository script being present.
+### Verified failed-chunk rescue
 
+A repeatedly bad 70–85 word chunk no longer aborts an otherwise healthy 8–12 minute narration immediately. After the normal focused retries, the server automatically re-splits only that failed span into smaller 24–36 word clause-aware pieces, renders them with conservative model settings, quality-checks each piece, and stitches only verified pieces back into the original position. If a smaller piece still hard-fails, one final 12–20 word rescue tier is attempted. Truly bad small segments are still rejected rather than silently shipped. This recovery path is shared by Chatterbox Turbo and Chatterbox Original.
 
-The audio tab row now always places **Generate Video** after the last existing
-audio workspace:
+**Motivational Speech now uses the same professional production pipeline with both Chatterbox Turbo and Chatterbox Original.** Chatterbox Original is now the default. Turbo remains selectable. Original keeps its native CFG and Exaggeration controls while using the same professional text, pacing, mastering, captions, reference analysis and quality-advisor pipeline. Turbo emotion tags are never sent literally to Original: the server maps the same direction to Original-supported settings and strips the control tokens before inference.
 
-```text
-Audio 1 | Generate Video | +
-Audio 1 | Audio 2 | Generate Video | +
-Audio 1 | Audio 2 | Audio 3 | Generate Video | +
-```
+### Shared professional pipeline
 
-The button therefore moves to the right when Audio 2, Audio 3, Audio 4 or Audio
-5 is added. Audio 1 remains the only default workspace.
+- **Senior Clear Speech** with conservative American-English text preparation
+- **Pronunciation Engine** for high-risk numbers, units and common health terms, plus editable `pronunciations.json`
+- **Serious Auto Emotion** with visible tags, heading protection and confidence filtering
+- **Intelligent Micro-Pause** and excessive-silence cleanup
+- **Age-aware target-band pacing** for 60s, 70s, 80s and 90+ listeners; in-band speech is left untouched
+- **Section openings, 30-second intro profile and sparse retention resets**
+- **Voice-aware mastering** with adaptive presence, de-essing and gentle compression
+- **Reference Voice Quality Analyzer** before professional clone generation
+- **Production Quality Gate** after each accepted chunk: acoustic checks, ASR/script comparison and optional reference-speaker consistency
+- **Focused Smart Retry** only for a failed chunk; a chunk still failing after two retries is rejected instead of silently shipped
+- **48 kHz stereo Video Master** companion WAV for video editing/upload
+- **SRT and VTT captions** aligned to the accepted audio while preserving creator-facing script terms
+- Optional local **performance feedback** storage for platform, 30-second retention and average view duration comparisons
 
-### Complete Avatar Talking workflow
+### Quality verification
 
-- Upload a permitted PNG, JPG or WebP portrait
-- Use any completed Audio 1–5 result without downloading and uploading it again
-- Or upload a separate WAV, MP3, M4A, FLAC, OGG or AAC file
-- Render through an isolated Ditto TensorRT worker on A100
-- Automatically fall back to the official Ditto PyTorch checkpoint
-- Choose 9:16, 16:9 or 1:1 output
-- Choose portrait framing, image fit, 720p or 1080p delivery and 25 or 30 fps
-- Use continuous rendering for maximum visual continuity
-- Use checkpointed rendering for restart-friendly 10–30 minute jobs
-- Split checkpointed jobs near natural audio silence rather than fixed hard cuts
-- Persist video jobs and progress across page refreshes
-- Cancel safely, inspect logs, preview the result and download the MP4
-- Preserve the original full-quality audio in the final H.264/AAC file
-- Run duration-drift and long-freeze technical checks after rendering
-- Automatically unload the TTS model before avatar rendering and restore it after
-  the video finishes, preventing the two GPU workloads from competing
+The production gate uses Faster-Whisper for English transcript verification and SpeechBrain ECAPA-TDNN for reference-speaker consistency when a clone/reference voice is used. Both models load lazily. If a verifier cannot load, acoustic checks remain active rather than preventing the server from starting.
 
-No avatar model can guarantee that every viewer will believe a generated video
-is a camera recording. Use clear source images, review the entire output, and
-regenerate any segment with unnatural eyes, teeth, lips, hair or background
-motion.
+The first professional generation in a fresh Colab runtime can take extra time while the verification models download. Subsequent generations reuse the local Hugging Face/model cache.
 
-## v0.8.0: MOSS unique voice generation
+### Output
 
-The **Generate Voice** workflow uses `OpenMOSS-Team/MOSS-VoiceGenerator`:
+Each completed professional job can provide:
 
-- Creates fictional American speaker timbres from text instructions
-- Builds speaker identity before age, emotion and delivery style
-- Does not globally slow audio or stretch words to imitate age
-- Over-generates and screens candidates for identity repetition and audio quality
-- Saves the selected candidate as a reusable Chatterbox reference voice
+1. Voice WAV for preview/editing
+2. 48 kHz stereo Video Master WAV
+3. SRT captions
+4. VTT captions
 
-## Other studio features
+The server does not add music.
 
-- Audio 1 only by default; add removable Audio 2–5 workspaces
-- Sequential audio queue with Generate All and Queue Monitor
-- Stable generated-voice preview players
-- Five bundled predefined American male voices
-- Import additional predefined or cloning WAV files
-- Main waveform, live playhead, zoom, pan and audio cutter
-- Download full audio, selected audio, Part One or Part Two
+## Studio features
+
+- Chatterbox Turbo default, Original available from the same model selector
+- Audio 1 by default; removable Audio 2–5 workspaces
+- Sequential GPU queue with Generate All and Queue Monitor
+- Five bundled predefined American male references plus uploaded clone references
+- Reference-quality status in the UI
+- Waveform, playhead, zoom, pan and audio cutter
 - FastAPI documentation at `/docs`
-- Responsive light and dark interface
+- Responsive light/dark interface
 
-## Repository relationship
+## Google Colab
 
-```text
-soft-meta/chatterbox-v2@v0.2.1
-        ↓
-soft-meta/Chatterbox-TTS-Server@v0.9.1
-        ↓
-Chatterbox + MOSS VoiceGenerator + isolated Ditto avatar worker
-```
+Open `colab/SoftMeta_Chatterbox_TTS_Colab_v1.5.3.ipynb` and run all cells. The notebook requests a GPU runtime with an L4 preference through Colab metadata. Actual L4 allocation remains controlled by Google Colab availability and account access.
 
-This project has no runtime dependency on Devnen repositories.
-
-## Google Colab A100
-
-Open `colab/SoftMeta_Chatterbox_TTS_Colab_v0.9.1.ipynb`, select an **A100 GPU**
-and run all cells. The notebook creates three isolated environments:
-
-- Python 3.11 Chatterbox server environment
-- Python 3.12 MOSS VoiceGenerator environment
-- Python 3.10 Ditto avatar environment
-
-The first setup downloads several gigabytes of voice and avatar checkpoints.
-Long video generation can take substantial time and storage even on A100.
-
-## Local avatar installation
-
-After preparing the main server and micromamba, run:
-
-```bash
-bash scripts/install_ditto_a100.sh /path/to/micromamba
-```
-
-Then export the paths printed by the script:
-
-```text
-SOFTMETA_AVATAR_PYTHON=/path/to/avatar310/bin/python
-SOFTMETA_DITTO_DIR=/path/to/ditto-talkinghead
-SOFTMETA_DITTO_CHECKPOINTS=/path/to/ditto-talkinghead/checkpoints
-```
+The notebook reuses the main Python environment and cached model files on later runs unless `FORCE_REINSTALL` is enabled.
 
 ## Docker
 
-The main container intentionally does not bake the very large Ditto checkpoints
-into the image. Mount an externally prepared Ditto directory and avatar Python
-environment, or run the avatar worker on the GPU host. See
-`docs/AVATAR_TALKING.md`.
-
-## Rights and disclosure
-
-Use only avatar images and reference voices that you own or have permission to
-use. Do not present a fictional avatar as a real named person. Follow platform
-rules that require synthetic-media disclosure.
+Build with `docker compose up --build`. Generated audio and voice/reference folders are mounted as configured in `docker-compose.yml`.
 
 ## Licence
 
-SoftMeta server and UI code are MIT licensed. Chatterbox is MIT licensed. MOSS
-VoiceGenerator and Ditto code are open source under their upstream licences.
-Ditto's published checkpoint bundle contains third-party face-analysis assets
-whose commercial terms require separate review. Read `THIRD_PARTY_NOTICES.md`
-before monetized deployment.
+SoftMeta server/UI code is MIT licensed. See `THIRD_PARTY_NOTICES.md` for upstream components.
+
+
+### v1.5.3 QC behavior
+
+- **ASR Quality Advisor:** Whisper mismatch, suspected repetition, missing-word suspicion and speaker-similarity drift can trigger focused retries and warnings, but they do not abort a long-form job by themselves.
+- **Acoustic Safety Gate:** only objective unusable waveform conditions such as empty/invalid audio, mostly silent audio, unusable level, or an implausible acoustic duration can hard-fail after local rescue.
+- **Original default:** Motivational Speech starts with Original-oriented defaults (temperature 0.72, exaggeration 0.58, CFG 0.35) and keeps the full professional pipeline.

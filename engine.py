@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any
 
 import torch
-import torchaudio.functional as audio_functional
 
 try:
     from softmeta_chatterbox import GenerationSettings, SoftMetaChatterboxEngine
@@ -24,6 +23,12 @@ class EngineResult:
 class EngineService:
     def __init__(self, device: str = "auto") -> None:
         self.runtime = SoftMetaChatterboxEngine(device=device)
+        # L4/Ada GPUs benefit from TensorFloat-32 for transformer matmuls.
+        # This changes compute precision, not audio sample rate or playback speed.
+        if self.runtime.device == "cuda" and torch.cuda.is_available():
+            torch.set_float32_matmul_precision("high")
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
 
     @property
     def loaded_model(self) -> str | None:
@@ -61,18 +66,15 @@ class EngineService:
             top_k=int(options["top_k"]),
             seed=int(options["seed"]),
         )
-        waveform, sample_rate = self.runtime.generate(
-            text,
-            model_name=model_name,  # type: ignore[arg-type]
-            reference_audio=reference_audio,
-            language=language,
-            settings=settings,
-        )
+        # No gradients are needed for TTS. inference_mode lowers Python/autograd
+        # overhead and memory pressure during long-form generation.
+        with torch.inference_mode():
+            waveform, sample_rate = self.runtime.generate(
+                text,
+                model_name=model_name,  # type: ignore[arg-type]
+                reference_audio=reference_audio,
+                language=language,
+                settings=settings,
+            )
 
-        speed = float(options.get("speed_factor", 1.0))
-        if abs(speed - 1.0) > 0.001:
-            # Change the sample count, then save at the original sample rate. This
-            # changes playback speed without adding a heavyweight DSP dependency.
-            resample_rate = max(4000, int(sample_rate / speed))
-            waveform = audio_functional.resample(waveform, sample_rate, resample_rate)
         return EngineResult(waveform=waveform, sample_rate=sample_rate)
