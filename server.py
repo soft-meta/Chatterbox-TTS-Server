@@ -15,28 +15,25 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from config import ROOT, load_config
-from avatar_engine import AvatarEngineService
 from engine import EngineService
+from emotion_director import analyze_serious_senior_advisor
+from reference_quality import analyze_reference_voice
 from models import (
     AudioJobCreate,
     CutRequest,
     GenerateAllRequest,
+    EmotionAnalyzeRequest,
     ModelLoadRequest,
     OpenAITTSRequest,
     RemoveJobsRequest,
-    VoiceDesignRequest,
-    VoiceCandidateSaveRequest,
-    VideoJobCreate,
-    RemoveVideoJobsRequest,
+    PerformanceFeedbackRequest,
 )
 from queue_manager import QueueManager
-from storage import AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, Storage
+from storage import AUDIO_EXTENSIONS, Storage
 from utils import safe_filename
-from video_queue import VideoQueueManager
-from voice_designer import VoiceDesigner
 
 APP_NAME = "SoftMeta Chatterbox TTS Server"
-APP_VERSION = "0.9.1"
+APP_VERSION = "1.5.3"
 logger = logging.getLogger("softmeta.chatterbox")
 
 config = load_config()
@@ -44,47 +41,19 @@ storage = Storage()
 engine = EngineService(device=config["tts_engine"]["device"])
 queue = QueueManager(engine=engine, storage=storage)
 model_load_task: asyncio.Task | None = None
-voice_design_lock = asyncio.Lock()
-avatar_engine = AvatarEngineService(storage, config)
-
-
-async def _before_video_render() -> str | None:
-    previous = engine.loaded_model
-    if previous:
-        await asyncio.get_running_loop().run_in_executor(queue.executor, engine.unload)
-    return previous
-
-
-async def _after_video_render(previous: str | None) -> None:
-    if previous:
-        await asyncio.get_running_loop().run_in_executor(queue.executor, engine.load, previous)
-
-
-video_queue = VideoQueueManager(
-    engine=avatar_engine,
-    storage=storage,
-    before_process=_before_video_render,
-    after_process=_after_video_render,
-)
-
-voice_designer = VoiceDesigner(
-    storage.generated,
-    storage.voice_candidates,
-    device=engine.device,
-)
 
 MODELS = [
     {
         "id": "chatterbox",
         "name": "Chatterbox Original (English)",
         "badge": "Original",
-        "description": "Expressive English narration and voice cloning.",
+        "description": "Default English narration engine. Uses Original CFG and Exaggeration controls with the full Professional Speech Pipeline.",
     },
     {
         "id": "chatterbox-turbo",
         "name": "Chatterbox Turbo (English)",
         "badge": "Turbo",
-        "description": "Faster English generation when supported by the installed engine.",
+        "description": "Optional faster English engine. Uses the same Professional Speech Pipeline when selected.",
     },
     {
         "id": "chatterbox-nano",
@@ -103,10 +72,10 @@ MODELS = [
 PRESETS = [
     {
         "name": "Motivational Speech",
-        "description": "Warm, expressive narration for clear US-English motivational delivery.",
+        "description": "Production-grade senior-advisor narration for Original or Turbo with pronunciation control, quality verification, speaker consistency, age-aware pacing, captions and platform mastering.",
         "language": "en",
-        "temperature": 0.8,
-        "exaggeration": 0.65,
+        "temperature": 0.72,
+        "exaggeration": 0.58,
         "cfg_weight": 0.35,
         "repetition_penalty": 1.2,
         "min_p": 0.05,
@@ -115,8 +84,27 @@ PRESETS = [
         "speed_factor": 1.0,
         "seed": 2025,
         "split_text": True,
-        "chunk_words": 90,
+        "chunk_words": 85,
         "output_format": "wav",
+        "senior_pace_profile": "70s",
+        "quality_gate": True,
+        "speaker_consistency": True,
+        "platform_assets": True,
+        "turbo_overrides": {
+            # Turbo does not support CFG/exaggeration/min_p. These values are
+            # deliberately neutral so the model does not emit ignored-control warnings.
+            # The supported sampling controls plus a pitch-preserving final tempo pass
+            # produce a calm senior-advisor / tutorial delivery.
+            "temperature": 0.60,
+            "exaggeration": 0.0,
+            "cfg_weight": 0.0,
+            "repetition_penalty": 1.18,
+            "min_p": 0.0,
+            "top_p": 0.85,
+            "top_k": 600,
+            "speed_factor": 1.0,
+            "chunk_words": 85,
+        },
     },
     {
         "name": "Natural Conversation",
@@ -170,14 +158,12 @@ async def _load_model_in_background(model_name: str) -> None:
 async def lifespan(_: FastAPI):
     global model_load_task
     await queue.start()
-    await video_queue.start()
     if config["server"].get("auto_load_model", True):
         default_model = config["tts_engine"]["default_model"]
         model_load_task = asyncio.create_task(_load_model_in_background(default_model))
     yield
     if model_load_task and not model_load_task.done():
         model_load_task.cancel()
-    await video_queue.stop()
     await queue.stop()
 
 
@@ -220,8 +206,6 @@ def health() -> dict[str, Any]:
         "engine": engine.status(),
         "queue_size": queue.queue.qsize(),
         "active_jobs": queue.has_active_jobs(),
-        "active_video_jobs": video_queue.has_active_jobs(),
-        "avatar": avatar_engine.status(),
     }
 
 
@@ -234,19 +218,29 @@ def initial_data() -> dict[str, Any]:
         "engine": engine.status(),
         "predefined_voices": storage.list_audio(storage.voices),
         "reference_voices": storage.list_audio(storage.references),
-        "generated_voices": storage.list_audio(storage.generated),
         "presets": PRESETS,
         "defaults": config["generation_defaults"],
         "jobs": queue.list_jobs(),
-        "video_jobs": video_queue.list_jobs(),
-        "avatar": avatar_engine.status(),
         "limits": {
             "max_audio_tabs": 5,
             "max_voice_upload_mb": 100,
-            "max_avatar_upload_mb": 25,
-            "max_video_audio_upload_mb": 600,
+        },
+        "production_quality": {
+            "models": ["chatterbox", "chatterbox-turbo"],
+            "asr_model": "small.en",
+            "speaker_verifier": "speechbrain/spkrec-ecapa-voxceleb",
+            "video_master_sample_rate": 48000,
         },
     }
+
+
+
+
+@app.post("/api/emotion/analyze")
+def analyze_emotion(request: EmotionAnalyzeRequest) -> dict[str, Any]:
+    """Preview the conservative emotion direction used by Original and Turbo."""
+    analysis = analyze_serious_senior_advisor(request.text)
+    return analysis.public_summary(include_text=True)
 
 
 @app.get("/api/model-info")
@@ -257,8 +251,8 @@ def model_info() -> dict[str, Any]:
 @app.post("/api/model/load")
 async def load_model(request: ModelLoadRequest) -> dict[str, Any]:
     global model_load_task
-    if queue.has_active_jobs() or video_queue.has_active_jobs():
-        raise HTTPException(409, "Wait for audio or video generation to finish before changing models.")
+    if queue.has_active_jobs():
+        raise HTTPException(409, "Wait for audio generation to finish before changing models.")
     if model_load_task and not model_load_task.done():
         raise HTTPException(409, "A model is already loading.")
     try:
@@ -270,8 +264,8 @@ async def load_model(request: ModelLoadRequest) -> dict[str, Any]:
 
 @app.post("/api/model/unload")
 async def unload_model() -> dict[str, Any]:
-    if queue.has_active_jobs() or video_queue.has_active_jobs():
-        raise HTTPException(409, "Wait for audio or video generation to finish before unloading the model.")
+    if queue.has_active_jobs():
+        raise HTTPException(409, "Wait for audio generation to finish before unloading the model.")
     await asyncio.get_running_loop().run_in_executor(queue.executor, engine.unload)
     return engine.status()
 
@@ -281,7 +275,6 @@ def voices() -> dict[str, Any]:
     return {
         "predefined": storage.list_audio(storage.voices),
         "clone": storage.list_audio(storage.references),
-        "generated": storage.list_audio(storage.generated),
     }
 
 
@@ -305,12 +298,24 @@ async def upload_voice(
                 destination.unlink(missing_ok=True)
                 raise HTTPException(413, "Voice file exceeds 100 MB.")
             output.write(chunk)
-    return {"filename": filename, "size": total, "kind": kind}
+    quality = await asyncio.to_thread(analyze_reference_voice, destination)
+    return {"filename": filename, "size": total, "kind": kind, "quality": quality}
+
+
+@app.get("/api/voices/{kind}/{filename}/quality")
+async def voice_quality(kind: str, filename: str) -> dict[str, Any]:
+    if kind not in {"predefined", "clone"}:
+        raise HTTPException(400, "Invalid voice type.")
+    try:
+        path = storage.voice_path(kind, filename)
+    except FileNotFoundError as error:
+        raise HTTPException(404, "Voice file not found.") from error
+    return await asyncio.to_thread(analyze_reference_voice, path)
 
 
 @app.get("/api/voices/{kind}/{filename}")
 def preview_voice(kind: str, filename: str, download: bool = False) -> FileResponse:
-    if kind not in {"predefined", "clone", "generated"}:
+    if kind not in {"predefined", "clone"}:
         raise HTTPException(400, "Invalid voice type.")
     try:
         path = storage.voice_path(kind, filename)
@@ -324,105 +329,6 @@ def preview_voice(kind: str, filename: str, download: bool = False) -> FileRespo
     )
 
 
-@app.get("/api/voice-designer/candidates/{session_id}/{filename}")
-def preview_voice_candidate(
-    session_id: str,
-    filename: str,
-    download: bool = False,
-) -> FileResponse:
-    try:
-        path = storage.candidate_path(session_id, filename)
-    except FileNotFoundError as error:
-        raise HTTPException(404, "Voice candidate was not found or has expired.") from error
-    return FileResponse(
-        path,
-        media_type=storage.media_type(path),
-        filename=path.name if download else None,
-        headers={"Cache-Control": "no-store", "Accept-Ranges": "bytes"},
-    )
-
-
-@app.post("/api/voice-designer/generate")
-async def generate_designed_voice(request: VoiceDesignRequest) -> dict[str, Any]:
-    if queue.has_active_jobs() or video_queue.has_active_jobs():
-        raise HTTPException(409, "Wait for the audio or video queue to finish before generating new voices.")
-    if voice_design_lock.locked():
-        raise HTTPException(409, "Voice candidates are already being generated.")
-
-    async with voice_design_lock:
-        previous_model = engine.loaded_model
-        try:
-            storage.cleanup_voice_candidates()
-            await asyncio.get_running_loop().run_in_executor(queue.executor, engine.unload)
-            result = await asyncio.get_running_loop().run_in_executor(
-                queue.executor,
-                lambda: voice_designer.generate_candidates(
-                    name=request.name,
-                    age=request.age,
-                    gender=request.gender,
-                    language=request.language,
-                    emotion=request.emotion,
-                    description=request.description,
-                    sample_text=request.sample_text,
-                    seed=request.seed,
-                    candidate_count=request.candidate_count,
-                    uniqueness_threshold=request.uniqueness_threshold,
-                ),
-            )
-        except Exception as error:
-            raise HTTPException(500, f"Voice generation failed: {type(error).__name__}: {error}") from error
-        finally:
-            if previous_model:
-                try:
-                    await asyncio.get_running_loop().run_in_executor(
-                        queue.executor, engine.load, previous_model
-                    )
-                except Exception:
-                    logger.exception("Could not reload Chatterbox after voice design")
-
-    session_id = result["session_id"]
-    public_candidates = []
-    for candidate in result["candidates"]:
-        filename = candidate["filename"]
-        public_candidates.append(
-            {
-                **candidate,
-                "preview_url": f"/api/voice-designer/candidates/{session_id}/{filename}",
-                "download_url": f"/api/voice-designer/candidates/{session_id}/{filename}?download=true",
-            }
-        )
-    return {**result, "candidates": public_candidates}
-
-
-@app.post("/api/voice-designer/save")
-async def save_voice_candidate(request: VoiceCandidateSaveRequest) -> dict[str, Any]:
-    if queue.has_active_jobs() or video_queue.has_active_jobs():
-        raise HTTPException(409, "Wait for the audio or video queue to finish before saving a generated voice.")
-    try:
-        path = await asyncio.get_running_loop().run_in_executor(
-            queue.executor,
-            lambda: voice_designer.save_candidate(
-                session_id=request.session_id,
-                filename=request.filename,
-                voice_name=request.voice_name,
-            ),
-        )
-    except FileNotFoundError as error:
-        raise HTTPException(404, "Voice candidate was not found or has expired.") from error
-    except Exception as error:
-        raise HTTPException(500, f"Could not save voice candidate: {type(error).__name__}: {error}") from error
-
-    info = sf.info(path)
-    return {
-        "filename": path.name,
-        "size": path.stat().st_size,
-        "duration": round(float(info.duration), 3),
-        "kind": "generated",
-        "preview_url": f"/api/voices/generated/{path.name}",
-        "download_url": f"/api/voices/generated/{path.name}?download=true",
-    }
-
-
 @app.get("/api/jobs")
 def list_jobs() -> list[dict[str, Any]]:
     return queue.list_jobs()
@@ -430,8 +336,6 @@ def list_jobs() -> list[dict[str, Any]]:
 
 @app.post("/api/jobs")
 async def create_job(request: AudioJobCreate) -> dict[str, Any]:
-    if video_queue.has_active_jobs():
-        raise HTTPException(409, "Wait for avatar video generation to finish before starting audio generation.")
     try:
         return await queue.create(request)
     except ValueError as error:
@@ -440,8 +344,6 @@ async def create_job(request: AudioJobCreate) -> dict[str, Any]:
 
 @app.post("/api/jobs/generate-all")
 async def generate_all(request: GenerateAllRequest) -> list[dict[str, Any]]:
-    if video_queue.has_active_jobs():
-        raise HTTPException(409, "Wait for avatar video generation to finish before starting audio generation.")
     try:
         return await queue.create_many(request.jobs)
     except ValueError as error:
@@ -466,8 +368,6 @@ async def cancel_job(job_id: str) -> dict[str, Any]:
 
 @app.delete("/api/jobs")
 async def remove_all_jobs(request: RemoveJobsRequest | None = None) -> dict[str, Any]:
-    if video_queue.has_active_jobs():
-        raise HTTPException(409, "Wait for avatar video generation to finish before removing source audio jobs.")
     try:
         await queue.clear(delete_files=True if request is None else request.delete_files)
     except RuntimeError as error:
@@ -477,8 +377,6 @@ async def remove_all_jobs(request: RemoveJobsRequest | None = None) -> dict[str,
 
 @app.delete("/api/jobs/{job_id}")
 async def remove_job(job_id: str, delete_file: bool = True) -> dict[str, Any]:
-    if video_queue.has_active_jobs():
-        raise HTTPException(409, "Wait for avatar video generation to finish before removing source audio.")
     try:
         await queue.delete(job_id, delete_file=delete_file)
     except KeyError as error:
@@ -505,6 +403,29 @@ def job_audio(job_id: str, download: bool = False) -> FileResponse:
         filename=path.name if download else None,
         headers={"Cache-Control": "no-store", "Accept-Ranges": "bytes"},
     )
+
+
+@app.get("/api/jobs/{job_id}/asset/{kind}")
+def job_asset(job_id: str, kind: str, download: bool = True) -> FileResponse:
+    try:
+        job = queue.get_raw(job_id)
+    except KeyError as error:
+        raise HTTPException(404, "Job not found.") from error
+    fields = {
+        "video-master": "video_master_filename",
+        "srt": "srt_filename",
+        "vtt": "vtt_filename",
+    }
+    field = fields.get(kind)
+    if field is None:
+        raise HTTPException(400, "Unknown output asset.")
+    filename = job.get(field)
+    if not filename:
+        raise HTTPException(404, "This job does not have that output asset.")
+    path = storage.output_path(filename)
+    if not path.is_file():
+        raise HTTPException(404, "Output asset not found.")
+    return FileResponse(path, media_type=storage.media_type(path), filename=path.name if download else None)
 
 
 def _waveform_peaks(path: Path, points: int) -> tuple[list[float], list[float], float]:
@@ -590,189 +511,6 @@ async def cut_audio(job_id: str, request: CutRequest) -> dict[str, Any]:
     return {"filename": filename, "duration": duration, "url": f"/outputs/{filename}"}
 
 
-@app.get("/api/video/status")
-def avatar_status() -> dict[str, Any]:
-    return avatar_engine.status()
-
-
-async def _save_upload(file: UploadFile, directory: Path, allowed: set[str], max_bytes: int, fallback: str) -> tuple[str, int]:
-    suffix = Path(file.filename or "").suffix.lower()
-    if suffix not in allowed:
-        raise HTTPException(400, f"Unsupported file format: {suffix or 'unknown'}.")
-    filename = safe_filename(Path(file.filename or fallback).stem, fallback) + suffix
-    destination = directory / filename
-    total = 0
-    with destination.open("wb") as output:
-        while chunk := await file.read(1024 * 1024):
-            total += len(chunk)
-            if total > max_bytes:
-                output.close()
-                destination.unlink(missing_ok=True)
-                raise HTTPException(413, "Uploaded file exceeds the configured size limit.")
-            output.write(chunk)
-    return filename, total
-
-
-@app.post("/api/video/avatar-upload")
-async def upload_avatar_image(file: UploadFile = File(...)) -> dict[str, Any]:
-    filename, total = await _save_upload(
-        file, storage.avatar_images, IMAGE_EXTENSIONS, 25 * 1024 * 1024, "avatar"
-    )
-    try:
-        from PIL import Image
-        with Image.open(storage.avatar_images / filename) as image:
-            image.verify()
-    except Exception as error:
-        (storage.avatar_images / filename).unlink(missing_ok=True)
-        raise HTTPException(400, "The uploaded file is not a valid avatar image.") from error
-    return {
-        "filename": filename,
-        "size": total,
-        "preview_url": f"/api/video/avatar/{filename}",
-    }
-
-
-@app.get("/api/video/avatar/{filename}")
-def preview_avatar_image(filename: str) -> FileResponse:
-    try:
-        path = storage.avatar_image_path(filename)
-    except FileNotFoundError as error:
-        raise HTTPException(404, "Avatar image not found.") from error
-    return FileResponse(path, media_type=storage.media_type(path), headers={"Cache-Control": "no-store"})
-
-
-@app.post("/api/video/audio-upload")
-async def upload_avatar_audio(file: UploadFile = File(...)) -> dict[str, Any]:
-    filename, total = await _save_upload(
-        file, storage.video_audio, AUDIO_EXTENSIONS, 600 * 1024 * 1024, "avatar_audio"
-    )
-    return {
-        "filename": filename,
-        "size": total,
-        "preview_url": f"/api/video/audio/{filename}",
-    }
-
-
-@app.get("/api/video/audio/{filename}")
-def preview_avatar_audio(filename: str) -> FileResponse:
-    try:
-        path = storage.video_audio_path(filename)
-    except FileNotFoundError as error:
-        raise HTTPException(404, "Avatar audio not found.") from error
-    return FileResponse(
-        path, media_type=storage.media_type(path), headers={"Cache-Control": "no-store", "Accept-Ranges": "bytes"}
-    )
-
-
-@app.get("/api/video/jobs")
-def list_video_jobs() -> list[dict[str, Any]]:
-    return video_queue.list_jobs()
-
-
-@app.post("/api/video/jobs")
-async def create_video_job(request: VideoJobCreate) -> dict[str, Any]:
-    if queue.has_active_jobs() or voice_design_lock.locked() or (model_load_task and not model_load_task.done()):
-        raise HTTPException(409, "Wait for audio, voice, or model loading to finish before creating a video.")
-    if video_queue.has_active_jobs():
-        raise HTTPException(409, "One avatar video is already queued or running.")
-    try:
-        avatar_path = storage.avatar_image_path(request.avatar_filename)
-    except FileNotFoundError as error:
-        raise HTTPException(404, "Avatar image not found. Upload it again.") from error
-
-    if request.audio_source == "audio_job":
-        try:
-            audio_job = queue.get(request.audio_job_id or "")
-        except KeyError as error:
-            raise HTTPException(404, "Selected audio job was not found.") from error
-        if audio_job.get("status") != "completed" or not audio_job.get("output_filename"):
-            raise HTTPException(409, "Selected audio is not completed yet.")
-        audio_path = storage.output_path(audio_job["output_filename"])
-        if not audio_path.is_file():
-            raise HTTPException(404, "Selected generated audio file is missing.")
-        audio_label = f"Audio {audio_job.get('audio_number', '')}: {audio_job.get('title') or audio_job['output_filename']}"
-    else:
-        try:
-            audio_path = storage.video_audio_path(request.audio_filename or "")
-        except FileNotFoundError as error:
-            raise HTTPException(404, "Uploaded video audio was not found.") from error
-        audio_label = request.audio_filename or audio_path.name
-    return await video_queue.create(request, avatar_path, audio_path, audio_label)
-
-
-@app.get("/api/video/jobs/{job_id}")
-def get_video_job(job_id: str) -> dict[str, Any]:
-    try:
-        return video_queue.get(job_id)
-    except KeyError as error:
-        raise HTTPException(404, "Video job not found.") from error
-
-
-@app.post("/api/video/jobs/{job_id}/cancel")
-async def cancel_video_job(job_id: str) -> dict[str, Any]:
-    try:
-        return await video_queue.cancel(job_id)
-    except KeyError as error:
-        raise HTTPException(404, "Video job not found.") from error
-
-
-@app.delete("/api/video/jobs")
-async def remove_all_video_jobs(request: RemoveVideoJobsRequest | None = None) -> dict[str, Any]:
-    try:
-        await video_queue.clear(delete_files=True if request is None else request.delete_files)
-    except RuntimeError as error:
-        raise HTTPException(409, str(error)) from error
-    return {"ok": True}
-
-
-@app.delete("/api/video/jobs/{job_id}")
-async def remove_video_job(job_id: str, delete_file: bool = True) -> dict[str, Any]:
-    try:
-        await video_queue.delete(job_id, delete_file=delete_file)
-    except KeyError as error:
-        raise HTTPException(404, "Video job not found.") from error
-    except RuntimeError as error:
-        raise HTTPException(409, str(error)) from error
-    return {"ok": True}
-
-
-@app.get("/api/video/jobs/{job_id}/log")
-def video_job_log(job_id: str, download: bool = False) -> FileResponse:
-    try:
-        job = video_queue.get(job_id)
-    except KeyError as error:
-        raise HTTPException(404, "Video job not found.") from error
-    log_filename = job.get("log_filename") or f"avatar_{job_id}.log"
-    path = storage.logs / log_filename
-    if not path.is_file():
-        raise HTTPException(404, "Video render log is not available yet.")
-    return FileResponse(
-        path,
-        media_type="text/plain",
-        filename=path.name if download else None,
-        headers={"Cache-Control": "no-store"},
-    )
-
-
-@app.get("/api/video/jobs/{job_id}/file")
-def video_job_file(job_id: str, download: bool = False) -> FileResponse:
-    try:
-        job = video_queue.get(job_id)
-    except KeyError as error:
-        raise HTTPException(404, "Video job not found.") from error
-    if job.get("status") != "completed" or not job.get("output_filename"):
-        raise HTTPException(409, "Video is not ready.")
-    try:
-        path = storage.video_output_path(job["output_filename"])
-    except FileNotFoundError as error:
-        raise HTTPException(404, "Generated video file is missing.") from error
-    return FileResponse(
-        path,
-        media_type="video/mp4",
-        filename=path.name if download else None,
-        headers={"Cache-Control": "no-store", "Accept-Ranges": "bytes"},
-    )
-
 
 @app.post("/tts")
 async def tts(request: AudioJobCreate) -> FileResponse:
@@ -800,6 +538,37 @@ async def openai_speech(request: OpenAITTSRequest) -> FileResponse:
         },
     )
     return await tts(job_request)
+
+
+@app.post("/api/performance/feedback")
+def save_performance_feedback(request: PerformanceFeedbackRequest) -> dict[str, Any]:
+    try:
+        job = queue.get_raw(request.job_id)
+    except KeyError as error:
+        raise HTTPException(404, "Job not found.") from error
+    row = {
+        **request.model_dump(),
+        "model": job.get("options", {}).get("model"),
+        "pace_profile": job.get("options", {}).get("senior_pace_profile"),
+        "preset": job.get("preset"),
+        "created_at": time.time(),
+    }
+    rows = storage.save_performance_feedback(row)
+    matching = [item for item in rows if item.get("platform") == row["platform"] and item.get("model") == row["model"] and item.get("pace_profile") == row["pace_profile"]]
+    avd = [float(item["average_view_duration_seconds"]) for item in matching if item.get("average_view_duration_seconds") is not None]
+    intro = [float(item["intro_retention_percent"]) for item in matching if item.get("intro_retention_percent") is not None]
+    return {
+        "saved": True,
+        "samples": len(matching),
+        "average_view_duration_seconds": round(sum(avd) / len(avd), 1) if avd else None,
+        "average_intro_retention_percent": round(sum(intro) / len(intro), 1) if intro else None,
+    }
+
+
+@app.get("/api/performance/summary")
+def performance_summary() -> dict[str, Any]:
+    rows = storage.load_performance_feedback()
+    return {"samples": len(rows), "items": rows[-100:]}
 
 
 @app.get("/v1/audio/voices")
