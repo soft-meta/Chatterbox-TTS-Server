@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import math
+import secrets
 import subprocess
 import time
 import uuid
@@ -15,7 +16,7 @@ import numpy as np
 import soundfile as sf
 
 from engine import EngineService
-from emotion_director import analyze_serious_senior_advisor, analyze_turbo_avatar_performance, contains_turbo_tag, is_heading, strip_turbo_tags
+from emotion_director import analyze_serious_senior_advisor, analyze_turbo_avatar_performance, contains_turbo_tag, is_heading, strip_turbo_tags, strip_abstract_turbo_tags
 from models import AudioJobCreate
 from storage import Storage
 from utils import (
@@ -42,6 +43,25 @@ logger = logging.getLogger(__name__)
 
 TERMINAL_STATES = {"completed", "failed", "cancelled", "interrupted"}
 ACTIVE_STATES = {"queued", "running"}
+
+
+OFFICIAL_TURBO_STANDARD_PROFILE: dict[str, Any] = {
+    # Matches Resemble AI's current official Turbo Gradio defaults.
+    "temperature": 0.80,
+    "exaggeration": 0.0,
+    "cfg_weight": 0.0,
+    "repetition_penalty": 1.20,
+    "min_p": 0.0,
+    "top_p": 0.95,
+    "top_k": 1000,
+    "speed_factor": 1.0,
+    "inter_chunk_pause_ms": 0,
+    "language": "en",
+    "split_text": False,
+    "quality_gate": False,
+    "speaker_consistency": False,
+    "platform_assets": False,
+}
 
 MOTIVATIONAL_TURBO_PROFILE: dict[str, Any] = {
     # Turbo has no CFG/exaggeration control. Keep sampling deliberately tighter
@@ -191,15 +211,23 @@ class QueueManager:
     @staticmethod
     def _effective_options(request: AudioJobCreate) -> dict[str, Any]:
         options = request.options.model_dump()
+        model_name = options.get("model")
+
+        # Standard button = clean Turbo A/B baseline.  No SoftMeta speech pipeline,
+        # no Auto Emotion, no QC rerendering, no post master, no captions.  Sampling
+        # values match Resemble AI's official Turbo Gradio app.  Seed 0 in that app
+        # means random, so resolve one random torch seed here instead of pinning zero.
+        if request.generation_mode == "standard" and model_name == "chatterbox-turbo":
+            options.update(OFFICIAL_TURBO_STANDARD_PROFILE)
+            options["seed"] = secrets.randbelow(2_147_483_646) + 1
+            options["_official_turbo_baseline"] = True
+            return options
+
         if request.preset == "Motivational Speech":
-            if options.get("model") == "chatterbox-turbo":
-                # Turbo lacks Original's native CFG/exaggeration controls, so its
-                # stable senior-advisor sampling profile is backend-enforced.
+            if model_name == "chatterbox-turbo":
                 options.update(MOTIVATIONAL_TURBO_PROFILE)
-            elif options.get("model") == "chatterbox":
-                # Original keeps the creator's native CFG/exaggeration/sampling
-                # controls. Only structural professional defaults are shared here;
-                # semantic direction and failed-chunk retry are applied per chunk.
+            elif model_name == "chatterbox":
+                # Original is intentionally frozen at its v1.5.5 behavior.
                 options.update({
                     "chunk_words": MOTIVATIONAL_ORIGINAL_PROFILE["chunk_words"],
                     "inter_chunk_pause_ms": MOTIVATIONAL_ORIGINAL_PROFILE["inter_chunk_pause_ms"],
@@ -519,10 +547,21 @@ class QueueManager:
         job_id = uuid.uuid4().hex
         now = time.time()
         effective_options = self._effective_options(request)
+        # The new Standard baseline exists only for Turbo. Original is intentionally
+        # frozen: if the shared UI sends "standard" while Original is selected, keep
+        # running the same existing professional path it used before v1.5.6.
+        generation_mode = request.generation_mode
+        if effective_options.get("model") != "chatterbox-turbo" and generation_mode == "standard":
+            generation_mode = "advanced"
+
+        # Standard Turbo is deliberately byte-for-text faithful: no auto tags,
+        # pronunciation rewrite, punctuation rewrite, chunk planner or SoftMeta text
+        # cleanup. What the creator sees in the textarea is what Turbo receives.
         generation_text = request.text
         emotion_summary: dict[str, Any] | None = None
         if (
-            request.preset == "Motivational Speech"
+            generation_mode == "advanced"
+            and request.preset == "Motivational Speech"
             and effective_options.get("model") in PROFESSIONAL_MODELS
         ):
             emotion_analysis = (
@@ -536,6 +575,7 @@ class QueueManager:
         job = {
             "id": job_id,
             "preset": request.preset,
+            "generation_mode": generation_mode,
             "audio_number": request.audio_number,
             "title": request.title.strip(),
             "text": request.text,
@@ -699,8 +739,13 @@ class QueueManager:
 
         options = job["options"]
         model_name = str(options.get("model"))
+        standard_turbo = bool(
+            job.get("generation_mode") == "standard"
+            and model_name == "chatterbox-turbo"
+        )
         professional_mode = (
-            job.get("preset") == "Motivational Speech"
+            job.get("generation_mode", "advanced") == "advanced"
+            and job.get("preset") == "Motivational Speech"
             and model_name in PROFESSIONAL_MODELS
         )
         professional_longform = professional_mode and options.get("split_text", True)
@@ -1293,7 +1338,7 @@ class QueueManager:
                 job["video_master_filename"] = video_filename
                 job["srt_filename"] = srt_filename
                 job["vtt_filename"] = vtt_filename
-        elif model_name == "chatterbox-turbo":
+        elif model_name == "chatterbox-turbo" and not standard_turbo:
             job["stage"] = "Normalising Turbo loudness"
             await asyncio.to_thread(self._normalize_turbo_loudness, output_path)
 

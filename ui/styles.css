@@ -946,3 +946,87 @@ textarea[data-field="text"] { min-height: 300px; line-height: 1.68; }
   .performance-grid { grid-template-columns: 1fr 1fr; }
   .generated-downloads { justify-content: flex-start; }
 }
+
+
+/* v1.5.6 Turbo baseline vs advanced human-performance A/B */
+.advanced-tag-details {
+  margin-top: 10px;
+  border: 1px solid var(--border, #d7dbe7);
+  border-radius: 10px;
+  background: var(--surface-soft, rgba(127,127,127,.05));
+  overflow: hidden;
+}
+.advanced-tag-details summary {
+  cursor: pointer;
+  padding: 9px 11px;
+  font-weight: 750;
+}
+.advanced-tag-details pre {
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border, #d7dbe7);
+  font: inherit;
+  line-height: 1.55;
+}
+.turbo-event-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  margin-top: 10px;
+}
+.turbo-event-tools > span {
+  margin-right: 2px;
+  color: var(--muted, #667085);
+  font-size: 12px;
+  font-weight: 750;
+}
+.turbo-event-tools button {
+  appearance: none;
+  border: 1px solid var(--border, #d7dbe7);
+  background: var(--surface, #fff);
+  color: inherit;
+  border-radius: 999px;
+  padding: 5px 9px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+.turbo-event-tools button:hover { border-color: var(--accent, #5b67f1); }
+.advanced-generate-button {
+  border-color: color-mix(in srgb, var(--accent, #5b67f1) 45%, var(--border, #d7dbe7));
+}
+.ab-compare {
+  margin: 18px 0;
+  padding: 16px;
+  border: 1px solid var(--border, #d7dbe7);
+  border-radius: 14px;
+  background: var(--surface-soft, rgba(127,127,127,.045));
+}
+.ab-compare-head h3 { margin: 0 0 4px; }
+.ab-compare-head p { margin: 0 0 14px; color: var(--muted, #667085); }
+.ab-compare-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0,1fr));
+  gap: 12px;
+}
+.ab-audio-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 13px;
+  border: 1px solid var(--border, #d7dbe7);
+  border-radius: 12px;
+  background: var(--surface, #fff);
+}
+.ab-audio-card > span { color: var(--muted, #667085); font-size: 12px; }
+.ab-audio-card audio { width: 100%; }
+@media (max-width: 720px) {
+  .ab-compare-grid { grid-template-columns: 1fr; }
+}
+
+.turbo-event-tools.disabled { opacity: .45; }
+.turbo-event-tools.disabled button { cursor: not-allowed; }

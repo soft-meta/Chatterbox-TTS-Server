@@ -32,6 +32,9 @@
       title: '',
       text: '',
       emotion_summary: null,
+      advanced_tagged_text: '',
+      standard_job_id: null,
+      advanced_job_id: null,
       preset: defaults.preset || 'Motivational Speech',
       language: defaults.language || 'en',
       voice_mode: 'clone',
@@ -87,7 +90,7 @@
     setTimeout(() => item.remove(), 5200);
   }
 
-  const VISIBLE_EMOTION_TAG_RE = /\[(?:happy|narration|surprised|dramatic)\]\s*/giu;
+  const VISIBLE_EMOTION_TAG_RE = /\[(?:happy|narration|surprised|dramatic|laugh|chuckle|sigh|gasp|clear throat|groan|sniff|cough|shush)\]\s*/giu;
 
   function stripVisibleEmotionTags(text) {
     return String(text || '').replace(VISIBLE_EMOTION_TAG_RE, '');
@@ -114,7 +117,7 @@
       ? `${summary.protected_headings} heading${summary.protected_headings === 1 ? '' : 's'} protected`
       : 'no headings detected';
     if (!summary.applied_count) {
-      return `0 tags inserted • calm narration kept • ${headingText}`;
+      return `0 audible events planned • natural narration kept • ${headingText}`;
     }
     const details = labels.length ? ` • ${labels.join(' • ')}` : '';
     const avatarCount = Number(summary.avatar_applied_count || 0);
@@ -124,7 +127,7 @@
     const resets = Number(summary.retention_reset_count || 0) > 0 ? ` • ${summary.retention_reset_count} retention reset${summary.retention_reset_count === 1 ? '' : 's'}` : '';
     const confidence = Number(summary.high_confidence_count || 0) + Number(summary.medium_confidence_count || 0);
     const confidenceText = confidence ? ` • ${summary.high_confidence_count || 0} high-confidence` : '';
-    return `${summary.applied_count} tag${summary.applied_count === 1 ? '' : 's'} inserted into script${details}${avatarText}${emphasis}${resets}${confidenceText} • ${headingText} • synced for Turbo generation`;
+    return `${summary.applied_count} audible event${summary.applied_count === 1 ? '' : 's'} planned${details}${avatarText}${confidenceText} • ${headingText} • used only by Generate Advanced Audio`;
   }
 
   function renderEmotionStatus(tab, message = null) {
@@ -137,7 +140,7 @@
       return;
     }
     box.classList.remove('hidden');
-    if (badge) badge.textContent = tab.emotion_summary ? 'Auto Emotion Applied' : 'Auto Emotion';
+    if (badge) badge.textContent = tab.emotion_summary ? 'Advanced Emotion Ready' : 'Advanced Emotion Plan';
     summary.textContent = message || emotionSummaryText(tab.emotion_summary);
   }
 
@@ -145,15 +148,13 @@
     const textarea = tab?.panel ? field(tab.panel, 'text') : null;
     if (!textarea || tab.text !== snapshot || textarea.value !== snapshot) return false;
     if (typeof result?.tagged_text !== 'string' || !result.tagged_text.trim()) return false;
-
-    const scrollTop = textarea.scrollTop;
-    const wasFocused = document.activeElement === textarea;
-    const nextText = result.tagged_text;
-    textarea.value = nextText;
-    tab.text = nextText;
-    textarea.scrollTop = scrollTop;
-    if (wasFocused) textarea.setSelectionRange(nextText.length, nextText.length);
-    tab.panel.querySelector('[data-role="word-count"]').textContent = `${countWords(nextText)} words`;
+    // Do not mutate the creator's script. Standard Turbo must receive the untouched
+    // baseline text. The Advanced button uses the server-side event plan instead.
+    tab.advanced_tagged_text = result.tagged_text;
+    const details = tab.panel.querySelector('[data-role="advanced-tag-details"]');
+    const preview = tab.panel.querySelector('[data-role="advanced-tag-preview"]');
+    if (preview) preview.textContent = result.tagged_text;
+    if (details) details.classList.remove('hidden');
     return true;
   }
 
@@ -185,13 +186,83 @@
         saveTabs();
       } catch (error) {
         if (tab.text === snapshot) {
-          renderEmotionStatus(tab, 'Auto Emotion analysis could not update the visible tags. Generation will still validate the script.');
+          renderEmotionStatus(tab, 'Advanced emotion planning could not refresh the preview. Advanced generation will re-analyze the script on the server.');
         }
       } finally {
         state.emotionTimers.delete(tab.id);
       }
     }, immediate ? 40 : 850);
     state.emotionTimers.set(tab.id, timer);
+  }
+
+  function insertTurboEventTag(tab, tag) {
+    const textarea = tab?.panel ? field(tab.panel, 'text') : null;
+    if (!textarea || !tag) return;
+    const start = textarea.selectionStart ?? textarea.value.length;
+    const end = textarea.selectionEnd ?? start;
+    const before = textarea.value.slice(0, start);
+    const after = textarea.value.slice(end);
+    const prefix = before && !/\s$/.test(before) ? ' ' : '';
+    const suffix = after && !/^\s/.test(after) ? ' ' : '';
+    const insertion = `${prefix}${tag}${suffix}`;
+    textarea.value = before + insertion + after;
+    const cursor = before.length + insertion.length;
+    textarea.focus();
+    textarea.setSelectionRange(cursor, cursor);
+    tab.text = textarea.value;
+    tab.panel.querySelector('[data-role="word-count"]').textContent = `${countWords(tab.text)} words`;
+    saveTabs();
+    scheduleEmotionAnalysis(tab, { immediate: true });
+  }
+
+  function updateAdvancedButtonState(tab) {
+    if (!tab?.panel) return;
+    const button = tab.panel.querySelector('[data-action="generate-advanced"]');
+    if (!button) return;
+    const model = $('#active-model')?.value || state.initial?.active_model || '';
+    const turbo = model === 'chatterbox-turbo';
+    button.disabled = !turbo;
+    button.title = turbo
+      ? 'Generate with Turbo Human Performance and the professional pipeline.'
+      : 'Advanced Audio is temporarily Turbo-only. Original remains unchanged.';
+    const eventTools = tab.panel.querySelector('[data-role="turbo-event-tools"]');
+    if (eventTools) {
+      eventTools.classList.toggle('disabled', !turbo);
+      eventTools.querySelectorAll('button').forEach(item => { item.disabled = !turbo; });
+    }
+  }
+
+  function renderABComparison(tab) {
+    if (!tab?.panel) return;
+    const section = tab.panel.querySelector('[data-role="ab-compare"]');
+    if (!section) return;
+    const standardJob = tab.standard_job_id ? state.jobs.get(tab.standard_job_id) : null;
+    const advancedJob = tab.advanced_job_id ? state.jobs.get(tab.advanced_job_id) : null;
+    const standardReady = standardJob?.status === 'completed';
+    const advancedReady = advancedJob?.status === 'completed';
+    section.classList.toggle('hidden', !standardReady && !advancedReady);
+
+    const bind = (kind, job, ready) => {
+      const player = tab.panel.querySelector(`[data-role="${kind}-compare-player"]`);
+      const download = tab.panel.querySelector(`[data-role="${kind}-compare-download"]`);
+      if (!player || !download) return;
+      if (ready) {
+        const url = `/api/jobs/${job.id}/audio`;
+        if (player.dataset.jobId !== job.id) {
+          player.src = url;
+          player.dataset.jobId = job.id;
+        }
+        download.href = `${url}?download=true`;
+        download.download = '';
+        download.classList.remove('hidden');
+      } else {
+        player.removeAttribute('src');
+        player.dataset.jobId = '';
+        download.classList.add('hidden');
+      }
+    };
+    bind('standard', standardJob, standardReady);
+    bind('advanced', advancedJob, advancedReady);
   }
 
   function formatTime(seconds, precise = false) {
@@ -259,7 +330,7 @@
   }
 
   function findTabByJob(jobId) {
-    return state.tabs.find(tab => tab.job_id === jobId);
+    return state.tabs.find(tab => tab.job_id === jobId || tab.standard_job_id === jobId || tab.advanced_job_id === jobId);
   }
 
   function field(panel, name) {
@@ -402,13 +473,14 @@
     panel.querySelector('[data-role="word-count"]').textContent = `${countWords(tab.text)} words`;
     panel.querySelector('[data-role="chunk-value"]').textContent = tab.chunk_words;
     panel.querySelector('.audio-number-chip').textContent = `Audio ${tab.number}`;
-    panel.querySelector('[data-role="generate-label"]').textContent = `Generate Audio ${tab.number}`;
     ['temperature', 'exaggeration', 'cfg_weight', 'speed_factor'].forEach(name => updateSliderOutput(panel, name));
     updateVoiceControls(tab);
     updatePresetChips(tab);
     renderEmotionStatus(tab);
     const job = tab.job_id ? state.jobs.get(tab.job_id) : null;
     if (job?.status === 'completed') showGenerated(tab, job);
+    renderABComparison(tab);
+    updateAdvancedButtonState(tab);
   }
 
   function captureTab(tab) {
@@ -619,7 +691,9 @@
       updateCutSummary(tab);
     });
 
-    panel.querySelector('[data-action="generate"]').addEventListener('click', () => generateOne(tab));
+    panel.querySelector('[data-action="generate-standard"]').addEventListener('click', () => generateOne(tab, 'standard'));
+    panel.querySelector('[data-action="generate-advanced"]').addEventListener('click', () => generateOne(tab, 'advanced'));
+    $$('[data-event-tag]', panel).forEach(button => button.addEventListener('click', () => insertTurboEventTag(tab, button.dataset.eventTag)));
     panel.querySelector('[data-role="voice-upload"]').addEventListener('change', event => uploadVoice(tab, event.target.files[0]));
     panel.querySelector('[data-action="refresh-voices"]').addEventListener('click', () => refreshVoices(tab));
     panel.querySelector('[data-action="preview-voice"]').addEventListener('click', () => previewVoice(tab));
@@ -680,10 +754,11 @@
     };
   }
 
-  function jobPayload(tab) {
+  function jobPayload(tab, generationMode = 'advanced') {
     captureTab(tab);
     return {
       preset: tab.preset,
+      generation_mode: generationMode,
       audio_number: tab.number,
       title: tab.title,
       text: tab.text,
@@ -703,21 +778,23 @@
     return '';
   }
 
-  async function generateOne(tab) {
+  async function generateOne(tab, generationMode = 'standard') {
     const errorMessage = validateTab(tab);
     if (errorMessage) {
       toast(errorMessage, 'error');
       return;
     }
-    const button = tab.panel.querySelector('[data-action="generate"]');
+    const button = tab.panel.querySelector(`[data-action="generate-${generationMode}"]`);
     button.disabled = true;
     try {
       const job = await api('/api/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(jobPayload(tab)),
+        body: JSON.stringify(jobPayload(tab, generationMode)),
       });
       tab.job_id = job.id;
+      if (generationMode === 'standard') tab.standard_job_id = job.id;
+      if (generationMode === 'advanced') tab.advanced_job_id = job.id;
       state.jobs.set(job.id, job);
       saveTabs();
       renderActive();
@@ -754,7 +831,7 @@
       const jobs = await api('/api/jobs/generate-all', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jobs: ready.map(jobPayload) }),
+        body: JSON.stringify({ jobs: ready.map(tab => jobPayload(tab, 'advanced')) }),
       });
       jobs.forEach((job, index) => {
         const tab = ready[index];
@@ -881,6 +958,7 @@
       state.tabs.forEach(tab => {
         const job = tab.job_id ? state.jobs.get(tab.job_id) : null;
         if (job?.status === 'completed') showGenerated(tab, job);
+        renderABComparison(tab);
       });
       renderActive();
       renderQueue();
@@ -933,7 +1011,8 @@
       const titleBox = document.createElement('div');
       const audioLabel = document.createElement('div');
       audioLabel.className = 'queue-audio-label';
-      audioLabel.textContent = `Audio ${job.audio_number}`;
+      const modeLabel = job.generation_mode === 'standard' ? 'Standard Turbo' : 'Advanced';
+      audioLabel.textContent = `Audio ${job.audio_number} • ${modeLabel}`;
       const title = document.createElement('div');
       title.className = 'queue-title';
       title.textContent = job.title || `Audio ${job.audio_number}`;
@@ -1125,7 +1204,8 @@
     } else if (qualityBox) {
       qualityBox.classList.add('hidden');
     }
-    panel.querySelector('[data-role="generation-meta"]').textContent = `Generation time ${humanDuration(job.elapsed_seconds)} • Duration ${formatTime(job.actual_audio_seconds || 0)} • ${job.options?.senior_pace_profile || '70s'} listener pace`;
+    const modeText = job.generation_mode === 'standard' ? 'Standard Turbo baseline' : 'Advanced professional pipeline';
+    panel.querySelector('[data-role="generation-meta"]').textContent = `Generation time ${humanDuration(job.elapsed_seconds)} • Duration ${formatTime(job.actual_audio_seconds || 0)} • ${modeText}`;
 
     if (!tab.waveform || tab.waveform.jobId !== job.id) {
       await loadWaveform(tab, job.id);
@@ -1456,7 +1536,11 @@
     modelSelect.addEventListener('change', () => {
       const info = state.initial.models.find(model => model.id === modelSelect.value);
       $('#model-badge').textContent = info?.badge || 'Model';
-      state.tabs.forEach(tab => scheduleEmotionAnalysis(tab, { immediate: true }));
+      state.tabs.forEach(tab => {
+        scheduleEmotionAnalysis(tab, { immediate: true });
+        updateAdvancedButtonState(tab);
+      });
+      renderActive();
     });
     setModelState(state.initial.engine);
 

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f7f9fc">
   <title>SoftMeta Chatterbox TTS Server</title>
-  <link rel="stylesheet" href="/static/styles.css?v=1.5.5">
+  <link rel="stylesheet" href="/static/styles.css?v=1.5.6">
 </head>
 <body>
   <header class="app-header">
@@ -72,7 +72,7 @@
   </main>
 
   <footer class="app-footer">
-    <span><a href="https://github.com/soft-meta/chatterbox-v2" target="_blank" rel="noopener">SoftMeta Chatterbox TTS</a> Server v1.5.5</span>
+    <span><a href="https://github.com/soft-meta/chatterbox-v2" target="_blank" rel="noopener">SoftMeta Chatterbox TTS</a> Server v1.5.6</span>
     <span>Powered by the official open-source Chatterbox engine</span>
   </footer>
 
@@ -113,21 +113,37 @@
         <div class="label-row">
           <div>
             <label>Text to synthesise</label>
-            <p>Paste your script. Motivational Speech reads the full script first for both Turbo and Original, then inserts sparse visible serious-expression tags automatically.</p>
+            <p>Paste your script. Generate Audio uses the clean Turbo baseline. Generate Advanced Audio plans audible Turbo events such as chuckles, sighs and gasps, then applies the professional pipeline.</p>
           </div>
           <span data-role="word-count">0 words</span>
         </div>
         <textarea data-field="text" rows="13" placeholder="Paste your script here..."></textarea>
         <div data-role="emotion-status" class="emotion-status hidden" aria-live="polite">
-          <span class="emotion-status-badge">Auto Emotion</span>
+          <span class="emotion-status-badge">Advanced Emotion Plan</span>
           <span data-role="emotion-summary">Waiting for script...</span>
+        </div>
+        <details data-role="advanced-tag-details" class="advanced-tag-details hidden">
+          <summary>View Advanced Turbo event tags</summary>
+          <pre data-role="advanced-tag-preview"></pre>
+        </details>
+        <div class="turbo-event-tools" data-role="turbo-event-tools">
+          <span>Manual Turbo events</span>
+          <button type="button" data-event-tag="[chuckle]">[chuckle]</button>
+          <button type="button" data-event-tag="[laugh]">[laugh]</button>
+          <button type="button" data-event-tag="[sigh]">[sigh]</button>
+          <button type="button" data-event-tag="[gasp]">[gasp]</button>
+          <button type="button" data-event-tag="[clear throat]">[clear throat]</button>
         </div>
       </div>
 
       <div class="generate-row">
-        <button data-action="generate" class="button button-primary generate-button" type="button">
+        <button data-action="generate-standard" class="button button-primary generate-button" type="button">
           <span class="speaker-icon">◖</span>
-          <span data-role="generate-label">Generate Audio</span>
+          <span>Generate Audio</span>
+        </button>
+        <button data-action="generate-advanced" class="button button-secondary generate-button advanced-generate-button" type="button">
+          <span class="speaker-icon">◖</span>
+          <span>Generate Advanced Audio</span>
         </button>
         <label class="inline-check">
           <input data-field="split_text" type="checkbox">
@@ -231,6 +247,29 @@
         </div>
       </details>
 
+      <section data-role="ab-compare" class="ab-compare hidden">
+        <div class="ab-compare-head">
+          <div>
+            <h3>Turbo A/B Comparison</h3>
+            <p>Same script and voice. Standard uses the clean official-style Turbo path. Advanced uses the SoftMeta professional pipeline.</p>
+          </div>
+        </div>
+        <div class="ab-compare-grid">
+          <article class="ab-audio-card">
+            <strong>Generate Audio</strong>
+            <span>Standard Chatterbox Turbo</span>
+            <audio data-role="standard-compare-player" controls preload="metadata"></audio>
+            <a data-role="standard-compare-download" class="button button-secondary hidden" href="#">Download Standard WAV</a>
+          </article>
+          <article class="ab-audio-card">
+            <strong>Generate Advanced Audio</strong>
+            <span>Turbo + Human Performance + Professional Pipeline</span>
+            <audio data-role="advanced-compare-player" controls preload="metadata"></audio>
+            <a data-role="advanced-compare-download" class="button button-secondary hidden" href="#">Download Advanced WAV</a>
+          </article>
+        </div>
+      </section>
+
       <section data-role="generated" class="generated-card hidden">
         <div class="generated-header">
           <div>
@@ -314,6 +353,6 @@
 
 
 
-  <script src="/static/app.js?v=1.5.5" defer></script>
+  <script src="/static/app.js?v=1.5.6" defer></script>
 </body>
 </html>

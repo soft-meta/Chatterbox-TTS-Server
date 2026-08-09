@@ -2,70 +2,63 @@
 
 Self-hosted long-form Chatterbox narration studio maintained by **SoftMeta**.
 
-## v1.5.5 Turbo Avatar Performance
+## v1.5.6 Turbo Standard vs Advanced Human Performance
 
-v1.5.5 makes **Chatterbox Turbo the production default** for the current senior-video workflow. Chatterbox Original remains available for comparison but its v1.5.4 behavior is intentionally left unchanged while the Turbo pipeline is tuned first.
+v1.5.6 keeps **Chatterbox Turbo as the production default** and adds a true A/B workflow. Chatterbox Original remains available but its existing behaviour is intentionally left unchanged while Turbo is validated first.
 
-### First 5-minute Avatar Performance Mode
+### Generate Audio: clean Turbo baseline
 
-- Turbo Auto Emotion is front-loaded into the first five minutes, where the narration is intended to drive a lip-synced talking avatar.
-- A full five-minute avatar window targets **10 restrained native emotion beats** when the script is long enough.
-- The planner prefers semantic emotion first, then fills only genuine long flat gaps with a calm `[narration]` reset.
-- Emotion spacing is checked so the opening does not contain long 60–70 second flat pockets when a safe sentence is available.
-- After the first five minutes, the plan becomes deliberately calmer for B-roll/natural-scene narration.
-- Auto-generated tags stay limited to Turbo-supported serious-narration cues: `[happy]`, `[narration]`, `[surprised]`, and `[dramatic]`. Comedic, angry, crying, laughing and similar auto-tags remain disabled.
+The first button is deliberately simple so it can be used as a control sample:
 
-### Turbo-native emotion delivery
+- one direct Chatterbox Turbo model call for short A/B scripts
+- creator text is passed to Turbo unchanged
+- official-style Turbo sampling defaults: temperature 0.8, top-p 0.95, top-k 1000, repetition penalty 1.2, min-p 0
+- no SoftMeta Auto Emotion
+- no Senior Clear Speech rewrite
+- no advanced chunk planner, adaptive pacing, Production QC rerendering, final mastering, captions or platform assets
+- the model's own loudness normalisation remains active inside the installed Chatterbox engine
 
-- Native emotion tokens are preserved all the way to Chatterbox Turbo inference.
-- Emotion sentences are isolated into compact local speech segments instead of being buried in a large 70–85 word chunk.
-- The first-five-minute emotion segments receive a wider adaptive pace band so post-processing does not force every emotional beat back to one cadence.
-- Warm/surprised beats may stay slightly more alive; reflective/serious beats are allowed to slow naturally.
-- ASR-only uncertainty is advisory and does not repeatedly regenerate a healthy expressive take until the emotion is flattened.
+This path is intended for short controlled comparisons such as the same one-minute script and reference voice used with both buttons.
 
-### Dynamic final mastering
+### Generate Advanced Audio: Turbo Human Performance
 
-Turbo uses a dynamics-preserving final mastering path:
+The second button keeps the professional pipeline but fixes the old emotion architecture. Previous builds inserted abstract tags such as `[happy]`, `[narration]`, `[surprised]` and `[dramatic]`; those did not reliably create audible human actions. v1.5.6 instead plans the Turbo event controls demonstrated by the upstream Turbo UI, including `[laugh]`, `[chuckle]`, `[sigh]` and `[gasp]`.
 
-- gentler compression than the standard professional path
-- slower attack/release so short expressive movement survives
-- approximately **-13 LUFS** final spoken-word target
-- approximately **-1 dBTP** peak safety target
-- chunk leveling avoids forcing every accepted segment to identical RMS
-- long intentional pauses remain perceptibly longer than ordinary pauses after silence cleanup
+A critical v1.5.5 bug was also fixed: the Senior Clear Speech punctuation normaliser used to remove the square brackets from new event tags before inference, turning `[chuckle]` into the literal word `chuckle`. v1.5.6 protects Turbo event tokens through pronunciation and text preparation so the bracketed control token reaches the Turbo engine intact.
 
-The mastering stage does not fabricate emotion. Its job is to preserve the dynamic movement produced by Turbo while keeping the final file clear and consistent.
+Automatic events are semantic rather than periodic:
 
-### Prosody Quality Advisor
+- `[laugh]` for strong explicit laughter/hilarious moments
+- `[chuckle]` for lighter laughter, smiling or wry moments
+- `[sigh]` for regret, loss, loneliness and hard lessons
+- `[gasp]` for explicit surprise or an unexpected reveal
+- manual buttons are available for `[chuckle]`, `[laugh]`, `[sigh]`, `[gasp]` and `[clear throat]`
+- ordinary serious advice does not receive a fake laugh or gasp simply to hit a quota
+- the first five-minute avatar window is prioritised when valid emotional moments exist, while later B-roll narration stays calmer
 
-Completed Turbo professional jobs also receive an advisory Prosody score. It reports:
+### Advanced professional pipeline retained
 
-- first-five-minute emotion beats versus target
-- maximum estimated emotion gap in the avatar window
-- measured final loudness range (LRA)
-- first-five-minute short-term RMS movement
-- longest acoustically flat stretch
-- integrated loudness and true peak
+Advanced Audio still includes:
 
-This score is diagnostic only and never rejects an otherwise healthy job. Production QC continues to handle waveform integrity, ASR/script verification, retries and optional speaker consistency.
-
-### Shared production features retained
-
-- Senior Clear Speech text preparation
-- Pronunciation Engine and editable `pronunciations.json`
-- heading protection
+- pronunciation preparation
+- Senior Clear Speech punctuation and phrasing
+- emotion-aware compact segmentation
 - Intelligent Micro-Pause and excessive-silence cleanup
 - age-aware target-band pacing for 60s, 70s, 80s and 90+ listeners
 - section openings, intro pacing and retention structure
 - reference voice quality analysis
-- Production QC and failed-chunk rescue
+- Production QC with advisory ASR and failed-chunk rescue
+- dynamics-preserving Turbo mastering
+- Prosody Quality Advisor
 - 48 kHz stereo Video Master WAV
 - SRT and VTT captions
 - optional performance feedback storage
 
+The A/B panel keeps the latest completed Standard and Advanced files side by side so the same script and voice can be compared directly.
+
 ## Chatterbox Original status
 
-Original is intentionally **not part of the new v1.5.5 tuning experiment**. It remains selectable and keeps its previous v1.5.4 behavior and controls. Once Turbo is validated successfully on real Colab output, the proven improvements can be ported to Original separately.
+Original is intentionally **not part of the new v1.5.6 Turbo tuning experiment**. It remains selectable and keeps its previous v1.5.4 behavior and controls. Once Turbo is validated successfully on real Colab output, the proven improvements can be ported to Original separately.
 
 ## Studio features
 
@@ -80,7 +73,7 @@ Original is intentionally **not part of the new v1.5.5 tuning experiment**. It r
 
 ## Google Colab
 
-Open `colab/SoftMeta_Chatterbox_TTS_Colab_v1.5.5.ipynb` and run all cells. The notebook requests a GPU runtime with an L4 preference through Colab metadata. Actual GPU allocation is controlled by Google Colab availability and account access.
+Open `colab/SoftMeta_Chatterbox_TTS_Colab_v1.5.6.ipynb` and run all cells. The notebook requests a GPU runtime with an L4 preference through Colab metadata. Actual GPU allocation is controlled by Google Colab availability and account access.
 
 The notebook starts the server with `SOFTMETA_MODEL=chatterbox-turbo` and reuses cached packages/model files on later runs unless `FORCE_REINSTALL` is enabled.
 

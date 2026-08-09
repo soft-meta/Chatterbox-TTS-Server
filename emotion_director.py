@@ -113,7 +113,12 @@ _PHRASES: dict[str, tuple[tuple[str, float], ...]] = {
 }
 
 _THRESHOLDS = {"happy": 2.15, "narration": 2.15, "surprised": 2.55, "dramatic": 4.10}
-_LABELS = {"happy": "warm", "narration": "reflective", "surprised": "surprised", "dramatic": "serious"}
+_LABELS = {
+    "happy": "warm", "narration": "reflective", "surprised": "surprised", "dramatic": "serious",
+    "laugh": "laugh", "chuckle": "chuckle", "sigh": "sigh", "gasp": "gasp",
+    "clear throat": "clear throat", "groan": "groan", "sniff": "sniff",
+    "cough": "cough", "shush": "shush",
+}
 
 # Secondary, calm emphasis patterns used only when a script has too few strong
 # lexical candidates. These create narration cues, never comedy or anger.
@@ -181,6 +186,16 @@ class EmotionAnalysis:
             data["tagged_text"] = self.tagged_text
         return data
 
+
+
+_ABSTRACT_TURBO_TAG_RE = re.compile(
+    r"\[(?:happy|narration|surprised|dramatic|angry|fear|crying|sarcastic|whispering|advertisement)\]\s*",
+    flags=re.IGNORECASE,
+)
+
+def strip_abstract_turbo_tags(text: str) -> str:
+    """Remove legacy abstract auto tags while preserving audible event tags."""
+    return _ABSTRACT_TURBO_TAG_RE.sub("", text or "")
 
 def strip_turbo_tags(text: str) -> str:
     return _TAG_RE.sub("", text)
@@ -555,216 +570,228 @@ def analyze_turbo_avatar_performance(
     target_wpm: int = 148,
     avatar_minutes: float = 5.0,
 ) -> EmotionAnalysis:
-    """Front-load Turbo-native expression for the on-camera avatar window.
+    """Plan *audible* Turbo event tags for human-style narration.
 
-    Original Chatterbox continues to use ``analyze_serious_senior_advisor`` unchanged.
-    Turbo starts from that conservative semantic plan, then adds only supported native
-    emotion tokens inside the first five-minute avatar zone when long flat stretches
-    remain. Semantic candidates are preferred; calm ``[narration]`` resets fill only
-    genuine spacing gaps. The tail stays deliberately calmer for B-roll narration.
+    v1.5.6 deliberately stops treating abstract tokenizer tokens such as
+    ``[happy]`` or ``[narration]`` as guaranteed audible acting controls.  Resemble
+    AI's own Turbo demo exposes event tags such as ``[laugh]``, ``[chuckle]``,
+    ``[sigh]`` and ``[gasp]``.  Those events are what this planner inserts.
+
+    The first five minutes receive priority because that is the avatar/on-camera
+    window.  Events are semantic, not periodic: we never manufacture a laugh in a
+    medical warning just to hit a quota.  Existing reliable manual event tags are
+    preserved and counted.
     """
-    base = analyze_serious_senior_advisor(text)
-    if base.total_words < 80:
-        base.mode = "Turbo Avatar Performance"
-        return base
-
     normalized = text.replace("\r\n", "\n").replace("\r", "\n")
-    sanitized = strip_turbo_tags(normalized)
-    lines = sanitized.split("\n")
-    total_words = count_words(sanitized)
-    avatar_window_words = min(total_words, max(0, int(round(max(target_wpm, 1) * max(avatar_minutes, 0.0)))))
-    if avatar_window_words <= 0:
-        return base
 
-    # Roughly one meaningful beat every 30-38 seconds at senior-advisor pace,
-    # capped at ten in the first five minutes. This is intentionally denser than the
-    # default Serious Senior Advisor plan but remains far below sentence-by-sentence acting.
-    # A full five-minute avatar window targets ten restrained beats, while shorter
-    # scripts scale down naturally. Using ceil here prevents a nominal 5-minute zone
-    # (about 740 words at 148 WPM) from stopping at nine cues and leaving a 60-70s
-    # flat pocket despite otherwise good semantic placements.
-    avatar_target = min(10, max(2, math.ceil(avatar_window_words / 78.0)))
-    total_cap = min(14, avatar_target + max(1, math.ceil(max(total_words - avatar_window_words, 0) / 240.0)))
+    reliable = {
+        "clear throat", "sigh", "shush", "cough", "groan",
+        "sniff", "gasp", "chuckle", "laugh",
+    }
+    reliable_re = re.compile(
+        r"\[(?:" + "|".join(re.escape(tag) for tag in sorted(reliable, key=len, reverse=True)) + r")\]",
+        flags=re.IGNORECASE,
+    )
+    # Remove old abstract auto tags from saved v1.5.4/v1.5.5 scripts while keeping
+    # the event tags that Turbo's official demo actually exposes.
+    abstract_re = re.compile(r"\[(?:happy|narration|surprised|dramatic|angry|fear|crying|sarcastic|whispering|advertisement)\]\s*", re.IGNORECASE)
+    normalized = abstract_re.sub("", normalized)
 
+    lines = normalized.split("\n")
+    total_words = count_words(strip_turbo_tags(normalized))
+    avatar_window_words = min(
+        total_words,
+        max(0, int(round(max(target_wpm, 1) * max(avatar_minutes, 0.0)))),
+    )
+
+    protected_headings = 0
+    manual_tags = len(reliable_re.findall(normalized))
     sentence_map: dict[int, list[_Sentence]] = {}
     flat_sentences: list[_Sentence] = []
     word_cursor = 0
     last_heading_end: int | None = None
     for line_index, raw_line in enumerate(lines):
         if is_heading(raw_line):
+            protected_headings += 1
             word_cursor += count_words(strip_turbo_tags(raw_line))
             last_heading_end = word_cursor
             continue
         sentence_list: list[_Sentence] = []
         for sentence_index, part in enumerate(_sentence_parts(raw_line)):
             speech_words = count_words(strip_turbo_tags(part))
-            start = word_cursor
-            end = word_cursor + speech_words
+            start_word = word_cursor
             sentence = _Sentence(
                 line_index=line_index,
                 sentence_index=sentence_index,
                 text=part,
-                start_word=start,
-                end_word=end,
-                after_heading_gap=None if last_heading_end is None else max(0, start - last_heading_end),
+                start_word=start_word,
+                end_word=start_word + speech_words,
+                after_heading_gap=None if last_heading_end is None else max(0, start_word - last_heading_end),
             )
             sentence_list.append(sentence)
             flat_sentences.append(sentence)
-            word_cursor = end
+            word_cursor += speech_words
         if sentence_list:
             sentence_map[line_index] = sentence_list
 
-    # Rebuild selected items from the conservative plan so its semantic decisions and
-    # calm tail remain intact. Then enrich only the first-five-minute Turbo zone.
-    selected: list[_Candidate] = []
-    by_key: dict[tuple[int, int], _Candidate] = {}
-    placement_positions = {(int(item.get("line", 0)) - 1, int(item.get("word_position", -1))): item for item in base.placements}
+    # High precision rules.  A real audible event must agree with the words around it.
+    # Scores are used only to rank competing candidates.
+    laugh_re = re.compile(
+        r"\b(?:burst out laughing|could(?:n't| not) stop laughing|laughed out loud|hilarious|made me laugh|"
+        r"we all laughed|I laughed so hard|funniest)\b", re.IGNORECASE,
+    )
+    chuckle_re = re.compile(
+        r"\b(?:I laughed|we laughed|he laughed|she laughed|made me smile|I smiled|we smiled|"
+        r"could(?:n't| not) help but smile|funny|little joke|teased me|grinned|lighthearted)\b", re.IGNORECASE,
+    )
+    sigh_re = re.compile(
+        r"\b(?:I wish I had|wish I had|I regret|my biggest regret|learned too late|too late|"
+        r"years I (?:cannot|can't) get back|lost years|I was lonely|felt alone|I miss (?:him|her|them)|"
+        r"passed away|died|heartbroken|it hurt|painful lesson|hard lesson|unfortunately|I ignored|"
+        r"I was wrong|carrying everything alone)\b", re.IGNORECASE,
+    )
+    gasp_re = re.compile(
+        r"\b(?:I could(?:n't| not) believe|I never expected|I did(?:n't| not) expect|to my surprise|"
+        r"what surprised me|I was shocked|shocked me|stopped me in my tracks|suddenly I realized|"
+        r"what happened next surprised|the result surprised)\b", re.IGNORECASE,
+    )
+    soft_sigh_re = re.compile(
+        r"\b(?:this is difficult|this can be hard|the hard truth|one painful truth|one of my mistakes|"
+        r"I learned this the hard way|I know how lonely|I know it hurts)\b", re.IGNORECASE,
+    )
+    soft_gasp_re = re.compile(
+        r"\b(?:few people realize|what many people miss|you may be surprised|you might be surprised|"
+        r"most people (?:do not|don't) realize)\b", re.IGNORECASE,
+    )
+
+    candidates: list[_Candidate] = []
+    manual_candidates: list[_Candidate] = []
     for sentence in flat_sentences:
-        item = placement_positions.get((sentence.line_index, sentence.start_word))
-        if not item:
+        existing = reliable_re.search(sentence.text)
+        if existing:
+            tag = existing.group(0)[1:-1].lower()
+            manual_candidates.append(_Candidate(sentence, tag, 10.0, "manual-event"))
             continue
-        candidate = _Candidate(
-            sentence=sentence,
-            tag=str(item.get("tag") or "narration"),
-            score=max(2.0, float(item.get("confidence", 0.75)) * 4.0),
-            source=str(item.get("source") or "semantic"),
-        )
-        selected.append(candidate)
-        by_key[(sentence.line_index, sentence.sentence_index)] = candidate
+        clean = strip_turbo_tags(sentence.text).strip()
+        if not clean or _CTA_RE.search(clean):
+            continue
+        words = count_words(clean)
+        if words < 4 or words > 55:
+            continue
+        if sentence.start_word < 10:
+            continue
+        if sentence.after_heading_gap is not None and sentence.after_heading_gap < 7:
+            continue
 
-    # Reserve the requested first-five-minute capacity before enrichment. The default
-    # planner may spend most of its budget in the calmer tail; Turbo Avatar Performance
-    # intentionally reverses that priority for the user's on-camera opening.
-    tail_cap = max(0, total_cap - avatar_target)
-    front_seed = [item for item in selected if item.sentence.start_word < avatar_window_words]
-    tail_seed = [item for item in selected if item.sentence.start_word >= avatar_window_words]
-    if len(tail_seed) > tail_cap:
-        tail_seed = sorted(tail_seed, key=lambda item: (-item.score, item.sentence.start_word))[:tail_cap]
-        selected = front_seed + tail_seed
-        by_key = {(item.sentence.line_index, item.sentence.sentence_index): item for item in selected}
+        tag: str | None = None
+        score = 0.0
+        if laugh_re.search(clean):
+            tag, score = "laugh", 5.0
+        elif chuckle_re.search(clean):
+            tag, score = "chuckle", 4.35
+        elif sigh_re.search(clean):
+            tag, score = "sigh", 4.6
+        elif gasp_re.search(clean):
+            tag, score = "gasp", 4.7
+        elif soft_sigh_re.search(clean):
+            tag, score = "sigh", 3.55
+        elif soft_gasp_re.search(clean):
+            tag, score = "gasp", 3.45
+        if tag:
+            # Small front-loading bonus, never enough to turn an invalid sentence valid.
+            if avatar_window_words and sentence.start_word < avatar_window_words:
+                score += 0.30 * (1.0 - sentence.start_word / max(avatar_window_words, 1))
+            candidates.append(_Candidate(sentence, tag, score, "audible-event"))
 
-    def front_items() -> list[_Candidate]:
-        return [item for item in selected if item.sentence.start_word < avatar_window_words]
+    # Audible non-speech events should be more frequent than v1.5.5's abstract tags,
+    # but still human.  A full five-minute avatar section tops out at seven automatic
+    # events.  Manual user tags do not consume semantic validity; they are always kept.
+    if total_words < 70:
+        avatar_target = 1 if candidates else 0
+    else:
+        avatar_target = min(7, max(2, math.ceil(max(avatar_window_words, 1) / 115.0)))
+    tail_target = min(2, max(0, math.ceil(max(total_words - avatar_window_words, 0) / 300.0)))
 
-    def gap_ok(sentence: _Sentence, tag: str, *, min_gap: int = 48) -> bool:
-        pos = sentence.start_word
-        if pos < 14 or pos >= avatar_window_words:
+    selected: list[_Candidate] = list(manual_candidates)
+    selected_keys = {(c.sentence.line_index, c.sentence.sentence_index) for c in selected}
+    counts: dict[str, int] = {tag: 0 for tag in reliable}
+    for c in selected:
+        counts[c.tag] = counts.get(c.tag, 0) + 1
+
+    # Prevent the output from becoming a sound-effects reel. Laugh is especially rare;
+    # sigh/chuckle can recur with adequate spacing, gasp stays sparse.
+    limits = {"laugh": 2, "chuckle": 3, "sigh": 4, "gasp": 3}
+
+    def in_avatar(c: _Candidate) -> bool:
+        return c.sentence.start_word < avatar_window_words
+
+    def can_add(c: _Candidate, *, front: bool) -> bool:
+        key = (c.sentence.line_index, c.sentence.sentence_index)
+        if key in selected_keys:
             return False
-        if sentence.after_heading_gap is not None and sentence.after_heading_gap < 8:
+        if counts.get(c.tag, 0) >= limits.get(c.tag, 1):
             return False
-        if any(abs(pos - item.sentence.start_word) < min_gap for item in front_items()):
+        pos = c.sentence.start_word
+        peers = [x for x in selected if (x.sentence.start_word < avatar_window_words) == front]
+        if any(abs(pos - x.sentence.start_word) < 52 for x in peers):
             return False
-        if any(tag == item.tag and abs(pos - item.sentence.start_word) < 74 for item in front_items()):
+        if any(c.tag == x.tag and abs(pos - x.sentence.start_word) < 105 for x in peers):
             return False
         return True
 
-    # Prefer unused high-confidence semantic/key-emphasis moments before adding neutral
-    # resets. Earlier positions get a small boost because the avatar section is the
-    # retention-critical part of the user's workflow.
-    extras: list[_Candidate] = []
-    for index, sentence in enumerate(flat_sentences):
-        if sentence.start_word >= avatar_window_words or sentence.start_word < 14:
-            continue
-        if (sentence.line_index, sentence.sentence_index) in by_key:
-            continue
-        previous = flat_sentences[index - 1].text if index > 0 else ""
-        following = flat_sentences[index + 1].text if index + 1 < len(flat_sentences) else ""
-        tag, score = _score_sentence(sentence.text, previous, following)
-        source = "semantic"
-        emphasis_tag, emphasis_score = key_emphasis_for_sentence(sentence.text)
-        if emphasis_tag and emphasis_score > score:
-            tag, score, source = emphasis_tag, emphasis_score, "key-emphasis"
-        if not tag:
-            fallback_score = _fallback_narration_score(sentence)
-            if fallback_score > 0:
-                tag, score, source = "narration", fallback_score, "advice-fallback"
-        if not tag:
-            continue
-        candidate = _Candidate(sentence=sentence, tag=tag, score=score, source=source)
-        if _candidate_confidence(candidate) < 0.68:
-            continue
-        early_bonus = max(0.0, 0.35 * (1.0 - sentence.start_word / max(avatar_window_words, 1)))
-        candidate.score += early_bonus
-        extras.append(candidate)
+    front_candidates = [c for c in candidates if in_avatar(c)]
 
-    for candidate in sorted(extras, key=lambda item: (-item.score, item.sentence.start_word)):
-        if len(front_items()) >= avatar_target or len(selected) >= total_cap:
+    # Diversity pass: when the script genuinely contains different human moments,
+    # do not let higher-scoring sigh/gasp candidates monopolise the entire avatar
+    # window.  Pick at most one positive vocal reaction, one reflective sigh and one
+    # surprise reaction before filling the remaining budget by confidence.  This
+    # never invents an event; every selected item still has to match the words.
+    diversity_groups = (
+        {"laugh", "chuckle"},
+        {"sigh"},
+        {"gasp"},
+    )
+    for group in diversity_groups:
+        auto_front = sum(1 for x in selected if in_avatar(x) and x.source != "manual-event")
+        if auto_front >= avatar_target:
             break
-        if not gap_ok(candidate.sentence, candidate.tag):
+        group_candidates = sorted(
+            (c for c in front_candidates if c.tag in group),
+            key=lambda x: (-x.score, x.sentence.start_word),
+        )
+        for c in group_candidates:
+            if not can_add(c, front=True):
+                continue
+            selected.append(c)
+            selected_keys.add((c.sentence.line_index, c.sentence.sentence_index))
+            counts[c.tag] = counts.get(c.tag, 0) + 1
+            break
+
+    for c in sorted(front_candidates, key=lambda x: (-x.score, x.sentence.start_word)):
+        auto_front = sum(1 for x in selected if in_avatar(x) and x.source != "manual-event")
+        if auto_front >= avatar_target:
+            break
+        if not can_add(c, front=True):
             continue
-        selected.append(candidate)
-        by_key[(candidate.sentence.line_index, candidate.sentence.sentence_index)] = candidate
+        selected.append(c)
+        selected_keys.add((c.sentence.line_index, c.sentence.sentence_index))
+        counts[c.tag] = counts.get(c.tag, 0) + 1
 
-    # Guarantee the first 30 seconds are not an entirely flat establishing read when a
-    # safe sentence exists. Use narration rather than inventing a positive/surprised mood.
-    intro_limit = min(82, avatar_window_words)
-    if not any(item.sentence.start_word < intro_limit for item in front_items()) and len(selected) < total_cap:
-        eligible = [
-            sentence for sentence in flat_sentences
-            if 14 <= sentence.start_word < intro_limit
-            and 7 <= count_words(strip_turbo_tags(sentence.text)) <= 42
-            and not _CTA_RE.search(sentence.text)
-            and (sentence.after_heading_gap is None or sentence.after_heading_gap >= 8)
-        ]
-        if eligible:
-            chosen = min(eligible, key=lambda sentence: abs(sentence.start_word - 42))
-            reset = _Candidate(chosen, "narration", 2.25, "avatar-reset")
-            if gap_ok(chosen, "narration", min_gap=34):
-                selected.append(reset)
-                by_key[(chosen.line_index, chosen.sentence_index)] = reset
-
-    # Fill only genuine first-five-minute flat stretches. This keeps the average spacing
-    # around 30-40 seconds without fabricating happy/surprised emotion where the words
-    # do not support it.
-    attempted: set[int] = set()
-    while len(front_items()) < avatar_target and len(selected) < total_cap:
-        front = sorted(front_items(), key=lambda item: item.sentence.start_word)
-        anchors = [12] + [item.sentence.start_word for item in front] + [avatar_window_words]
-        gaps = [(right - left, left, right) for left, right in zip(anchors, anchors[1:])]
-        gap, left, right = max(gaps, key=lambda item: item[0])
-        if gap <= 86:
+    tail_candidates = [c for c in candidates if not in_avatar(c)]
+    for c in sorted(tail_candidates, key=lambda x: (-x.score, x.sentence.start_word)):
+        auto_tail = sum(1 for x in selected if not in_avatar(x) and x.source != "manual-event")
+        if auto_tail >= tail_target:
             break
-        target = (left + right) // 2
-        if target in attempted:
-            break
-        attempted.add(target)
-        eligible = []
-        for sentence in flat_sentences:
-            if not (14 <= sentence.start_word < avatar_window_words):
-                continue
-            if (sentence.line_index, sentence.sentence_index) in by_key:
-                continue
-            clean = strip_turbo_tags(sentence.text).strip()
-            if _CTA_RE.search(clean) or not (7 <= count_words(clean) <= 42):
-                continue
-            if sentence.after_heading_gap is not None and sentence.after_heading_gap < 8:
-                continue
-            if not gap_ok(sentence, "narration", min_gap=46):
-                continue
-            eligible.append(sentence)
-        if not eligible:
-            break
-        chosen = min(eligible, key=lambda sentence: abs(sentence.start_word - target))
-        reset = _Candidate(chosen, "narration", 2.20, "avatar-reset")
-        selected.append(reset)
-        by_key[(chosen.line_index, chosen.sentence_index)] = reset
+        if not can_add(c, front=False):
+            continue
+        selected.append(c)
+        selected_keys.add((c.sentence.line_index, c.sentence.sentence_index))
+        counts[c.tag] = counts.get(c.tag, 0) + 1
 
-    # If the enriched front pushed the plan over the global cap, keep every avatar beat
-    # and retain only the earliest/strongest calm-tail items. Original is unaffected.
-    if len(selected) > total_cap:
-        front = [item for item in selected if item.sentence.start_word < avatar_window_words]
-        tail = [item for item in selected if item.sentence.start_word >= avatar_window_words]
-        tail = sorted(tail, key=lambda item: (-item.score, item.sentence.start_word))[: max(0, total_cap - len(front))]
-        selected = front + tail
-
-    selected.sort(key=lambda item: item.sentence.start_word)
-    selected_lookup = {(item.sentence.line_index, item.sentence.sentence_index): item for item in selected}
-    counts = {tag: 0 for tag in AUTO_ALLOWED_TAGS}
-    for item in selected:
-        counts[item.tag] += 1
-
-    output_lines: list[str] = []
+    selected.sort(key=lambda c: c.sentence.start_word)
+    lookup = {(c.sentence.line_index, c.sentence.sentence_index): c for c in selected}
     placements: list[dict[str, Any]] = []
+    output_lines: list[str] = []
     for line_index, raw_line in enumerate(lines):
         if is_heading(raw_line):
             output_lines.append(raw_line)
@@ -775,35 +802,39 @@ def analyze_turbo_avatar_performance(
             continue
         rendered: list[str] = []
         for sentence in sentence_list:
-            chosen = selected_lookup.get((line_index, sentence.sentence_index))
-            if chosen:
-                rendered.append(f"[{chosen.tag}] {sentence.text}")
-                placements.append({
-                    "tag": chosen.tag,
-                    "label": _LABELS[chosen.tag],
-                    "source": chosen.source,
-                    "confidence": round(_candidate_confidence(chosen), 2),
-                    "word_position": sentence.start_word,
-                    "line": line_index + 1,
-                    "excerpt": sentence.text[:120],
-                    "avatar_zone": sentence.start_word < avatar_window_words,
-                })
-            else:
+            chosen = lookup.get((line_index, sentence.sentence_index))
+            if not chosen:
                 rendered.append(sentence.text)
+                continue
+            if chosen.source == "manual-event":
+                rendered.append(sentence.text)
+            else:
+                rendered.append(f"[{chosen.tag}] {sentence.text}")
+            placements.append({
+                "tag": chosen.tag,
+                "label": _LABELS.get(chosen.tag, chosen.tag),
+                "source": chosen.source,
+                "confidence": 1.0 if chosen.source == "manual-event" else round(min(0.98, 0.74 + (chosen.score - 3.4) * 0.10), 2),
+                "word_position": sentence.start_word,
+                "line": line_index + 1,
+                "excerpt": strip_turbo_tags(sentence.text)[:120],
+                "avatar_zone": sentence.start_word < avatar_window_words,
+            })
         output_lines.append(" ".join(rendered))
 
-    applied = {tag: count for tag, count in counts.items() if count}
+    by_tag = {tag: count for tag, count in counts.items() if count}
     avatar_applied = sum(1 for item in placements if item.get("avatar_zone"))
     return EmotionAnalysis(
         tagged_text="\n".join(output_lines).strip(),
         total_words=total_words,
-        applied_count=sum(applied.values()),
-        protected_headings=base.protected_headings,
-        manual_tags=base.manual_tags,
-        by_tag=applied,
+        applied_count=sum(by_tag.values()),
+        protected_headings=protected_headings,
+        manual_tags=manual_tags,
+        by_tag=by_tag,
         placements=placements,
-        mode="Turbo Avatar Performance",
+        mode="Turbo Human Performance Events",
         avatar_window_words=avatar_window_words,
         avatar_applied_count=avatar_applied,
         avatar_target_count=avatar_target,
     )
+

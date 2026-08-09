@@ -284,7 +284,7 @@ def test_original_preserves_user_cfg_and_exaggeration_while_sharing_quality_pipe
 
 
 def test_v150_colab_keeps_l4_and_verifies_qc_packages() -> None:
-    path = ROOT / "colab" / "SoftMeta_Chatterbox_TTS_Colab_v1.5.5.ipynb"
+    path = ROOT / "colab" / "SoftMeta_Chatterbox_TTS_Colab_v1.5.6.ipynb"
     notebook = json.loads(path.read_text(encoding="utf-8"))
     assert notebook["metadata"]["accelerator"] == "GPU"
     assert notebook["metadata"]["colab"]["gpuType"] == "L4"

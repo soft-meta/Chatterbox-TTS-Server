@@ -36,7 +36,7 @@ def test_boxed_desktop_layout() -> None:
 
 
 def test_colab_is_tts_only_and_turbo_default() -> None:
-    notebook_path = ROOT / "colab" / "SoftMeta_Chatterbox_TTS_Colab_v1.5.5.ipynb"
+    notebook_path = ROOT / "colab" / "SoftMeta_Chatterbox_TTS_Colab_v1.5.6.ipynb"
     notebook = json.loads(notebook_path.read_text(encoding="utf-8"))
     text = notebook_path.read_text(encoding="utf-8")
     source = "\n".join("".join(cell.get("source", [])) for cell in notebook["cells"])

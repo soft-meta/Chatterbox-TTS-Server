@@ -6,8 +6,14 @@ from typing import Any
 
 from utils import count_words, prepare_american_english_tts_text, split_text
 
-_TURBO_TAG = re.compile(r"\[(?:happy|surprised|dramatic|narration)\]", re.IGNORECASE)
-_EMOTION_TAG_CAPTURE = re.compile(r"^\s*\[(happy|surprised|dramatic|narration)\]\s*", re.IGNORECASE)
+_TURBO_TAG = re.compile(
+    r"\[(?:happy|surprised|dramatic|narration|laugh|chuckle|sigh|gasp|clear throat|groan|sniff|cough|shush)\]",
+    re.IGNORECASE,
+)
+_EMOTION_TAG_CAPTURE = re.compile(
+    r"^\s*\[(happy|surprised|dramatic|narration|laugh|chuckle|sigh|gasp|clear throat|groan|sniff|cough|shush)\]\s*",
+    re.IGNORECASE,
+)
 _SENTENCE = re.compile(r"(?<=[.!?])(?:[\"'”’)]*)\s+")
 
 # Deliberately serious. These are comprehension/emphasis cues, not entertainment cues.
@@ -377,15 +383,29 @@ def build_long_form_segments(
                     # Keep warm/surprise moments slightly more alive and reflective/serious
                     # moments more deliberate, while widening the band so atempo does not
                     # iron the native tag performance back to one cadence.
-                    emotion_delta = {"narration": -6, "happy": 2, "surprised": 1, "dramatic": -8}.get(emotion_tag or "", -4)
+                    emotion_delta = {
+                        "narration": -6, "happy": 2, "surprised": 1, "dramatic": -8,
+                        "laugh": 3, "chuckle": 1, "sigh": -9, "gasp": -2,
+                        "clear throat": -2, "groan": -8, "sniff": -5, "cough": -3, "shush": -6,
+                    }.get(emotion_tag or "", -4)
                     target_wpm = body_target + emotion_delta
-                    band = max(band, 16)
-                    pause_before = 175 if emotion_tag == "dramatic" else 95
+                    band = max(band, 18 if emotion_tag in {"laugh", "chuckle", "sigh", "gasp"} else 16)
+                    pause_before = {
+                        "sigh": 190, "gasp": 135, "laugh": 105, "chuckle": 95,
+                        "dramatic": 175, "clear throat": 145,
+                    }.get(emotion_tag or "", 95)
                 else:
-                    emotion_delta = {"narration": -4, "happy": 0, "surprised": -2, "dramatic": -6}.get(emotion_tag or "", -3)
+                    emotion_delta = {
+                        "narration": -4, "happy": 0, "surprised": -2, "dramatic": -6,
+                        "laugh": 2, "chuckle": 0, "sigh": -7, "gasp": -2,
+                        "clear throat": -2, "groan": -7, "sniff": -4, "cough": -2, "shush": -5,
+                    }.get(emotion_tag or "", -3)
                     target_wpm = body_target + emotion_delta
-                    band = max(band, 13)
-                    pause_before = 150 if emotion_tag == "dramatic" else 115
+                    band = max(band, 15 if emotion_tag in {"laugh", "chuckle", "sigh", "gasp"} else 13)
+                    pause_before = {
+                        "sigh": 175, "gasp": 130, "laugh": 105, "chuckle": 100,
+                        "dramatic": 150, "clear throat": 140,
+                    }.get(emotion_tag or "", 115)
             elif importance:
                 target_wpm = body_target + int(pace["important_delta"])
                 pause_before = 300 if role != "section" else 520

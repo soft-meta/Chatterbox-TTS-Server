@@ -6,7 +6,7 @@ from pathlib import Path
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])(?:[\"'”’)]*)\s+")
 _CLAUSE_BOUNDARY = re.compile(r"(?<=[,;:])\s+")
 _WORD = re.compile(r"\b[\w’'-]+\b", flags=re.UNICODE)
-_SAFE_TURBO_TAG = re.compile(r"\[(?:happy|surprised|dramatic|narration)\]", flags=re.IGNORECASE)
+_SAFE_TURBO_TAG = re.compile(r"\[(?:happy|surprised|dramatic|narration|laugh|chuckle|sigh|gasp|clear throat|groan|sniff|cough|shush)\]", flags=re.IGNORECASE)
 
 
 def count_words(text: str) -> int:
@@ -21,8 +21,7 @@ def prepare_american_english_tts_text(text: str) -> str:
 
     This deliberately does *not* pretend to change a cloned speaker's accent. It keeps
     the input in English and removes punctuation patterns that can cause Turbo to hold
-    very long pauses, while preserving the supported expression tags inserted by the
-    Serious Senior Advisor director.
+    very long pauses, while preserving Turbo control/event tags inserted by the advanced director.
     """
     normalized = text.replace("\r\n", "\n").replace("\r", "\n")
 

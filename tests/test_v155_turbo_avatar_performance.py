@@ -32,7 +32,7 @@ I was lonely for a long time before I learned how much a simple phone call could
 """
 
 
-def test_turbo_frontloads_first_five_minute_emotion_without_changing_original_planner() -> None:
+def test_turbo_plans_semantic_audible_events_without_changing_original_planner() -> None:
     text = "\n".join([BASE] * 4)
     original = analyze_serious_senior_advisor(text)
     turbo = analyze_turbo_avatar_performance(text)
@@ -41,22 +41,20 @@ def test_turbo_frontloads_first_five_minute_emotion_without_changing_original_pl
     assert original.avatar_window_words == 0
     assert original.avatar_applied_count == 0
 
-    assert turbo.mode == "Turbo Avatar Performance"
-    assert 8 <= turbo.avatar_target_count <= 10
-    assert turbo.avatar_applied_count >= min(8, turbo.avatar_target_count)
-    assert turbo.avatar_applied_count <= 10
-    # A full five-minute window should use the complete ten-beat budget so no long
-    # flat pocket remains in the on-camera section.
-    assert turbo.avatar_target_count == 10
-    front_positions = sorted(
-        int(item["word_position"]) for item in turbo.placements if item.get("avatar_zone")
-    )
-    anchors = [12] + front_positions + [turbo.avatar_window_words]
-    assert max(b - a for a, b in zip(anchors, anchors[1:])) <= 125
-    assert turbo.applied_count - turbo.avatar_applied_count <= 4
-    assert set(turbo.by_tag).issubset({"happy", "narration", "surprised", "dramatic"})
-    assert len(turbo.by_tag) >= 2
-    assert all(item.get("avatar_zone") is True for item in turbo.placements if item["word_position"] < turbo.avatar_window_words)
+    assert turbo.mode == "Turbo Human Performance Events"
+    assert 2 <= turbo.avatar_target_count <= 7
+    assert turbo.avatar_applied_count >= 4
+    assert turbo.applied_count - turbo.avatar_applied_count <= 2
+    assert set(turbo.by_tag).issubset({
+        "laugh", "chuckle", "sigh", "gasp", "clear throat",
+        "groan", "sniff", "cough", "shush",
+    })
+    # This serious advice sample genuinely contains regret/surprise language but no
+    # humour, so the planner should not manufacture a laugh just to hit a quota.
+    assert "laugh" not in turbo.by_tag
+    assert "chuckle" not in turbo.by_tag
+    assert "sigh" in turbo.by_tag
+    assert "gasp" in turbo.by_tag
 
 
 def test_turbo_avatar_segments_get_wider_local_pace_band_only_in_turbo_mode() -> None:
@@ -109,8 +107,8 @@ def test_v155_is_turbo_first_in_server_ui_and_colab() -> None:
     assert DEFAULT_CONFIG["tts_engine"]["default_model"] == "chatterbox-turbo"
     app = (ROOT / "ui" / "app.js").read_text(encoding="utf-8")
     server = (ROOT / "server.py").read_text(encoding="utf-8")
-    notebook = (ROOT / "colab" / "SoftMeta_Chatterbox_TTS_Colab_v1.5.5.ipynb").read_text(encoding="utf-8")
+    notebook = (ROOT / "colab" / "SoftMeta_Chatterbox_TTS_Colab_v1.5.6.ipynb").read_text(encoding="utf-8")
     assert "model === 'chatterbox-turbo'" in app
     assert "analyze_turbo_avatar_performance" in server
-    assert 'APP_VERSION = "1.5.5"' in server
+    assert 'APP_VERSION = "1.5.6"' in server
     assert '\\"SOFTMETA_MODEL\\": \\"chatterbox-turbo\\"' in notebook

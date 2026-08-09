@@ -33,7 +33,7 @@ from storage import AUDIO_EXTENSIONS, Storage
 from utils import safe_filename
 
 APP_NAME = "SoftMeta Chatterbox TTS Server"
-APP_VERSION = "1.5.5"
+APP_VERSION = "1.5.6"
 logger = logging.getLogger("softmeta.chatterbox")
 
 config = load_config()
@@ -53,7 +53,7 @@ MODELS = [
         "id": "chatterbox-turbo",
         "name": "Chatterbox Turbo (English)",
         "badge": "Turbo",
-        "description": "Production default for senior narration with native emotion tags and the Turbo Avatar Performance pipeline.",
+        "description": "Production default. Standard Audio provides a clean Turbo baseline; Advanced Audio adds audible Turbo events and the professional narration pipeline.",
     },
     {
         "id": "chatterbox-nano",
@@ -72,7 +72,7 @@ MODELS = [
 PRESETS = [
     {
         "name": "Motivational Speech",
-        "description": "Production-grade senior-advisor narration for Original or Turbo with pronunciation control, quality verification, speaker consistency, age-aware pacing, captions and platform mastering.",
+        "description": "Advanced senior-advisor narration profile. Turbo uses audible human-performance events plus pronunciation, pacing, QC, mastering and captions; Original remains on its existing path.",
         "language": "en",
         "temperature": 0.72,
         "exaggeration": 0.58,
