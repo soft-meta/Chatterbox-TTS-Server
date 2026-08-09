@@ -8,9 +8,9 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-PRO_FINAL_TARGET_LUFS = -12.5
+PRO_FINAL_TARGET_LUFS = -13.0
 PRO_FINAL_TRUE_PEAK_DBFS = -1.0
-PRO_FINAL_LRA = 5.5
+PRO_FINAL_LRA = 7.0
 VIDEO_MASTER_SAMPLE_RATE = 48000
 
 
@@ -18,12 +18,12 @@ def shape_professional_pauses(
     audio: np.ndarray,
     sample_rate: int,
     *,
-    min_detect_ms: int = 520,
-    medium_pause_ms: int = 460,
-    long_pause_ms: int = 340,
-    long_threshold_ms: int = 900,
-    leading_pause_ms: int = 70,
-    trailing_pause_ms: int = 100,
+    min_detect_ms: int = 650,
+    medium_pause_ms: int = 390,
+    long_pause_ms: int = 520,
+    long_threshold_ms: int = 1200,
+    leading_pause_ms: int = 65,
+    trailing_pause_ms: int = 95,
 ) -> np.ndarray:
     """Keep breath-sized pauses but compact distracting dead air and generated hiss."""
     data = np.asarray(audio, dtype=np.float32).reshape(-1).copy()
@@ -131,7 +131,7 @@ def analyze_voice_mastering_profile(output_path: Path) -> dict[str, float | str]
         tone = "neutral"
         presence_gain = 1.05
         deesser = 0.10
-    ratio = 2.05 if crest_db > 16 else 1.75 if crest_db < 11 else 1.9
+    ratio = 1.72 if crest_db > 16 else 1.50 if crest_db < 11 else 1.62
     return {
         "tone": tone,
         "presence_gain_db": round(presence_gain, 2),
@@ -165,7 +165,7 @@ def master_professional_voice(output_path: Path) -> dict[str, float | str]:
         "equalizer=f=180:t=q:w=0.8:g=-0.8,"
         f"equalizer=f=3200:t=q:w=1.0:g={presence_gain:.2f},"
         f"deesser=i={deesser:.2f}:m=0.30:f=0.55,"
-        f"acompressor=threshold=0.125:ratio={ratio:.2f}:attack=20:release=190:makeup=1.10:knee=2.5:detection=rms"
+        f"acompressor=threshold=0.125:ratio={ratio:.2f}:attack=24:release=220:makeup=1.06:knee=2.5:detection=rms"
     )
     try:
         _run_ffmpeg([

@@ -119,16 +119,18 @@ def test_original_uses_same_visible_direction_without_speaking_turbo_tags(tmp_pa
         )
         assert "[happy]" not in spoken
         assert spoken.startswith("The good news")
-        assert options["exaggeration"] == 0.58
-        assert options["cfg_weight"] == 0.35
+        assert options["exaggeration"] > 0.58
+        assert options["cfg_weight"] <= 0.32
+        assert options["_emotion_tag"] == "happy"
         retry_spoken, retry_options = manager._original_chunk_direction(
             "[dramatic] This serious warning deserves calm attention.",
             {"temperature": 0.72, "exaggeration": 0.58, "cfg_weight": 0.35, "_quality_retry": True},
         )
         assert "[dramatic]" not in retry_spoken
-        assert retry_options["temperature"] == 0.60
-        assert retry_options["exaggeration"] == 0.52
-        assert retry_options["cfg_weight"] == 0.32
+        assert retry_options["temperature"] < 0.60
+        assert retry_options["exaggeration"] > 0.52
+        assert retry_options["cfg_weight"] <= 0.28
+        assert retry_options["_emotion_tag"] == "dramatic"
     finally:
         manager.executor.shutdown(wait=False, cancel_futures=True)
 
@@ -282,7 +284,7 @@ def test_original_preserves_user_cfg_and_exaggeration_while_sharing_quality_pipe
 
 
 def test_v150_colab_keeps_l4_and_verifies_qc_packages() -> None:
-    path = ROOT / "colab" / "SoftMeta_Chatterbox_TTS_Colab_v1.5.3.ipynb"
+    path = ROOT / "colab" / "SoftMeta_Chatterbox_TTS_Colab_v1.5.4.ipynb"
     notebook = json.loads(path.read_text(encoding="utf-8"))
     assert notebook["metadata"]["accelerator"] == "GPU"
     assert notebook["metadata"]["colab"]["gpuType"] == "L4"

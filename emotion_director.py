@@ -382,18 +382,22 @@ def analyze_serious_senior_advisor(text: str) -> EmotionAnalysis:
         max_tags = 0
         desired_min = 0
     else:
-        # Professional sparse direction: up to about one cue per 100 words, capped at
-        # eight for long scripts. For 200-300 word scripts, try to find at least two
-        # meaningful moments if the content supplies suitable candidates.
-        max_tags = min(8, max(1, math.ceil(total_words / 100)))
-        desired_min = min(max_tags, max(1, total_words // 125))
+        # Professional but perceptible direction. Long 8–12 minute scripts need
+        # enough local expression beats to be audible without turning into acting.
+        # Aim for roughly one potential cue per 120 words, capped at fourteen; medium
+        # scripts still receive at least two meaningful cues when content supports it.
+        max_tags = min(14, max(1, math.ceil(total_words / 120)))
+        if total_words >= 220:
+            desired_min = min(max_tags, max(2, total_words // 170))
+        else:
+            desired_min = 1
 
-    min_gap_words = 58
+    min_gap_words = 44
     tag_limits = {
         "happy": max(1, math.ceil(max_tags * 0.40)) if max_tags else 0,
         "narration": max(1, math.ceil(max_tags * 0.62)) if max_tags else 0,
-        "surprised": min(2, max_tags),
-        "dramatic": min(1, max_tags),
+        "surprised": min(3, max_tags),
+        "dramatic": min(2 if total_words >= 900 else 1, max_tags),
     }
     selected: list[_Candidate] = []
     counts = {tag: 0 for tag in AUTO_ALLOWED_TAGS}
@@ -402,7 +406,7 @@ def analyze_serious_senior_advisor(text: str) -> EmotionAnalysis:
     # before we have a chance to break up a 90+ second flat stretch.
     reserved_reset_slots = 0
     if total_words >= 500 and max_tags >= 3:
-        reserved_reset_slots = 1 if max_tags < 7 else 2
+        reserved_reset_slots = 1 if max_tags < 7 else 2 if max_tags < 12 else 3
     semantic_cap = max(0, max_tags - reserved_reset_slots)
 
     def can_select(candidate: _Candidate) -> bool:
@@ -456,7 +460,7 @@ def analyze_serious_senior_advisor(text: str) -> EmotionAnalysis:
             positions = [40] + [item.sentence.start_word for item in selected] + [total_words]
             gaps = [(b - a, a, b) for a, b in zip(positions, positions[1:])]
             gap, left, right = max(gaps, key=lambda item: item[0])
-            if gap <= 210:
+            if gap <= 175:
                 break
             target = (left + right) // 2
             if target in attempted_targets:

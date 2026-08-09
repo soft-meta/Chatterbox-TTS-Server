@@ -24,7 +24,7 @@ from utils import (
     safe_filename,
     split_text,
 )
-from speech_pipeline import build_long_form_segments, prepare_senior_clear_speech_text
+from speech_pipeline import build_long_form_segments, emotion_tag_for_text, prepare_senior_clear_speech_text
 from pronunciation_engine import prepare_pronunciation_text
 from quality_control import ChunkQualityReport, QualityController, summarize_quality
 from captions import aligned_expected_words, fallback_words, write_caption_files
@@ -99,11 +99,15 @@ MOTIVATIONAL_ORIGINAL_RETRY_PROFILE: dict[str, Any] = {
     "cfg_weight": 0.32,
 }
 
+# Original has no native text emotion tokens. Apply a local, model-native expression
+# delta only to the compact emotion segment. Resemble's guidance for expressive
+# Original speech is higher exaggeration with CFG around 0.3; these caps keep senior
+# narration controlled rather than theatrical.
 ORIGINAL_EMOTION_PROFILE: dict[str, dict[str, float]] = {
-    "narration": {"temperature": 0.68, "exaggeration": 0.54, "cfg_weight": 0.36},
-    "happy": {"temperature": 0.72, "exaggeration": 0.58, "cfg_weight": 0.35},
-    "surprised": {"temperature": 0.68, "exaggeration": 0.60, "cfg_weight": 0.34},
-    "dramatic": {"temperature": 0.64, "exaggeration": 0.62, "cfg_weight": 0.32},
+    "narration": {"temperature_delta": -0.02, "exaggeration_delta": 0.05, "cfg_ceiling": 0.34},
+    "happy": {"temperature_delta": 0.00, "exaggeration_delta": 0.10, "cfg_ceiling": 0.32},
+    "surprised": {"temperature_delta": -0.02, "exaggeration_delta": 0.16, "cfg_ceiling": 0.30},
+    "dramatic": {"temperature_delta": -0.04, "exaggeration_delta": 0.18, "cfg_ceiling": 0.28},
 }
 
 class QueueManager:
@@ -203,17 +207,29 @@ class QueueManager:
         return options
 
     @staticmethod
-    def _original_chunk_direction(chunk: str, options: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    def _original_chunk_direction(
+        chunk: str,
+        options: dict[str, Any],
+        emotion_tag: str | None = None,
+    ) -> tuple[str, dict[str, Any]]:
         directed = dict(options)
         is_quality_retry = bool(directed.pop("_quality_retry", False))
-        tag_match = __import__("re").search(r"\[(happy|surprised|dramatic|narration)\]", chunk, flags=__import__("re").IGNORECASE)
-        if tag_match:
-            directed.update(ORIGINAL_EMOTION_PROFILE.get(tag_match.group(1).lower(), {}))
-        # A failed Original chunk must genuinely become more conservative on retry.
-        # Apply the safety profile *after* the semantic direction so emotion cannot
-        # accidentally restore the looser first-pass temperature/exaggeration.
+        # Retry first establishes a safer base; local expression is then re-applied
+        # within restrained caps. v1.5.3 applied retry *after* emotion, which silently
+        # removed Original's expression whenever QC requested a second pass.
         if is_quality_retry:
             directed.update(MOTIVATIONAL_ORIGINAL_RETRY_PROFILE)
+
+        tag = (emotion_tag or emotion_tag_for_text(chunk) or "").lower() or None
+        profile = ORIGINAL_EMOTION_PROFILE.get(tag or "")
+        if profile:
+            base_temperature = float(directed.get("temperature", 0.72))
+            base_exaggeration = float(directed.get("exaggeration", 0.58))
+            base_cfg = float(directed.get("cfg_weight", 0.35))
+            directed["temperature"] = float(np.clip(base_temperature + profile["temperature_delta"], 0.45, 0.90))
+            directed["exaggeration"] = float(np.clip(base_exaggeration + profile["exaggeration_delta"], 0.50, 0.82))
+            directed["cfg_weight"] = float(np.clip(min(base_cfg, profile["cfg_ceiling"]), 0.22, 0.45))
+            directed["_emotion_tag"] = tag
         return strip_turbo_tags(chunk).strip(), directed
 
     @staticmethod
@@ -337,12 +353,39 @@ class QueueManager:
         }
 
     @staticmethod
-    def _level_turbo_chunk(audio: np.ndarray) -> np.ndarray:
-        """Level each Turbo chunk before concatenation.
+    def _level_professional_chunk(audio: np.ndarray, emotion_tag: str | None = None) -> np.ndarray:
+        """Correct only real level outliers while preserving expressive dynamics.
 
-        Final-file LUFS alone can leave most of a narration quiet when one or two
-        generated chunks are unexpectedly loud. Per-chunk RMS matching removes that
-        imbalance first, then a conservative peak ceiling prevents clipping.
+        v1.5.3 forced every accepted chunk to the same RMS target. That solved random
+        volume jumps but also flattened the natural energy difference created by Turbo
+        tags and Original exaggeration. Keep a professional target *band* instead.
+        """
+        data = np.asarray(audio, dtype=np.float32).reshape(-1).copy()
+        if data.size == 0:
+            return data
+        data = np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)
+        rms = float(np.sqrt(np.mean(np.square(data, dtype=np.float64)) + 1e-12))
+        if rms > 1e-6:
+            current_db = 20.0 * math.log10(rms)
+            expressive = bool(emotion_tag)
+            low_db, high_db = (-20.5, -13.0) if expressive else (-20.0, -14.5)
+            target_db = -16.2 if expressive else TURBO_CHUNK_TARGET_RMS_DBFS
+            if current_db < low_db or current_db > high_db:
+                gain_db = float(np.clip(target_db - current_db, -7.0, 9.0))
+                data *= 10.0 ** (gain_db / 20.0)
+        peak = float(np.max(np.abs(data)))
+        ceiling_db = -1.2 if emotion_tag else TURBO_CHUNK_PEAK_CEILING_DBFS
+        ceiling = 10.0 ** (ceiling_db / 20.0)
+        if peak > ceiling and peak > 0.0:
+            data *= ceiling / peak
+        return data
+
+    @staticmethod
+    def _level_turbo_chunk(audio: np.ndarray) -> np.ndarray:
+        """Legacy strict Turbo leveler retained for backward compatibility/tests.
+
+        Production v1.5.4 uses ``_level_professional_chunk`` so intentional emotion
+        energy is not normalized away. This helper keeps the prior public behavior.
         """
         data = np.asarray(audio, dtype=np.float32).reshape(-1).copy()
         if data.size == 0:
@@ -717,8 +760,11 @@ class QueueManager:
         async def render_once(chunk: str, segment, chunk_options: dict[str, Any]) -> tuple[Any, np.ndarray, str, dict[str, float]]:
             spoken_chunk = chunk
             effective_chunk_options = dict(chunk_options)
+            segment_emotion = getattr(segment, "emotion_tag", None) if segment is not None else emotion_tag_for_text(chunk)
             if model_name == "chatterbox":
-                spoken_chunk, effective_chunk_options = self._original_chunk_direction(chunk, effective_chunk_options)
+                spoken_chunk, effective_chunk_options = self._original_chunk_direction(
+                    chunk, effective_chunk_options, segment_emotion
+                )
 
             result = await loop.run_in_executor(
                 self.executor,
@@ -750,7 +796,7 @@ class QueueManager:
                     if abs(tempo - 1.0) > 0.002:
                         audio = await asyncio.to_thread(apply_tempo_array, audio, result.sample_rate, tempo)
                         audio = shape_professional_pauses(audio, result.sample_rate)
-                audio = self._level_turbo_chunk(audio)
+                audio = self._level_professional_chunk(audio, segment_emotion)
             raw_metrics = self._audio_metrics(audio, result.sample_rate, max(count_words(strip_turbo_tags(spoken_chunk)), 1))
             return result, audio, spoken_chunk, raw_metrics
 
@@ -979,6 +1025,29 @@ class QueueManager:
                 combined_report,
             )
 
+        def quality_retry_needed(report: ChunkQualityReport | None, emotion_tag: str | None) -> bool:
+            if report is None:
+                return False
+            if not report.passed or report.hard_failure:
+                return True
+            if not report.retry_recommended:
+                return False
+            if not emotion_tag:
+                return True
+            # Expressive speech can be harder for Whisper to transcribe literally. Do
+            # not let ASR-only uncertainty repeatedly regenerate an emotion beat and
+            # select a flatter take. Acoustic/speaker warnings still trigger retry.
+            advisory_prefixes = (
+                "high ASR mismatch", "moderate ASR mismatch", "ASR heard ",
+                "possible repeated or hallucinated words", "ASR strongly suspects",
+                "ASR suspects", "ASR content verification",
+            )
+            substantive = [
+                reason for reason in report.reasons
+                if not reason.startswith(advisory_prefixes)
+            ]
+            return bool(substantive)
+
         try:
             for index, chunk in enumerate(chunks, start=1):
                 segment = directed_segments[index - 1] if professional_longform else None
@@ -1028,9 +1097,8 @@ class QueueManager:
                         ),
                     )
 
-                needs_retry = legacy_unstable or (
-                    report is not None and (not report.passed or report.retry_recommended)
-                )
+                segment_emotion = getattr(segment, "emotion_tag", None) if segment is not None else emotion_tag_for_text(chunk)
+                needs_retry = legacy_unstable or quality_retry_needed(report, segment_emotion)
                 best_result, best_audio, best_spoken, best_metrics, best_report = result, audio, spoken_chunk, raw_metrics, report
                 if professional_mode and needs_retry:
                     # At most two focused retries, only for the failed chunk. This raises

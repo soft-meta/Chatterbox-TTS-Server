@@ -69,7 +69,7 @@ def test_long_script_gets_sparse_retention_resets_without_comedy():
     result = analyze_serious_senior_advisor(text)
     reset_items = [p for p in result.placements if p.get("source") == "retention-reset"]
     assert reset_items, result.placements
-    assert result.applied_count <= 8
+    assert result.applied_count <= 14
     assert "[laugh]" not in result.tagged_text.lower()
     assert "[chuckle]" not in result.tagged_text.lower()
     assert "[angry]" not in result.tagged_text.lower()

@@ -68,8 +68,8 @@ The good news is that a gentle daily walk can make the routine easier to maintai
 def test_auto_emotion_is_sparse_and_non_comedic() -> None:
     text = _long_serious_script()
     result = analyze_serious_senior_advisor(text)
-    # About one cue per 125 words, capped at eight, with additional spacing rules.
-    expected_cap = min(8, max(1, __import__("math").ceil(result.total_words / 125)))
+    # About one potential cue per 120 words, capped at fourteen, with additional spacing/diversity rules.
+    expected_cap = min(14, max(1, __import__("math").ceil(result.total_words / 120)))
     assert 1 <= result.applied_count <= expected_cap
     for forbidden in AUTO_FORBIDDEN_TAGS:
         assert f"[{forbidden}]" not in result.tagged_text.lower()
@@ -105,9 +105,9 @@ def test_backend_and_ui_use_hidden_auto_emotion_pipeline() -> None:
 
 
 def test_colab_requests_l4_and_final_version_is_current() -> None:
-    notebook_path = ROOT / "colab" / "SoftMeta_Chatterbox_TTS_Colab_v1.5.3.ipynb"
+    notebook_path = ROOT / "colab" / "SoftMeta_Chatterbox_TTS_Colab_v1.5.4.ipynb"
     notebook = json.loads(notebook_path.read_text(encoding="utf-8"))
     assert notebook["metadata"]["accelerator"] == "GPU"
     assert notebook["metadata"]["colab"]["gpuType"] == "L4"
     server_source = (ROOT / "server.py").read_text(encoding="utf-8")
-    assert 'APP_VERSION = "1.5.3"' in server_source
+    assert 'APP_VERSION = "1.5.4"' in server_source
