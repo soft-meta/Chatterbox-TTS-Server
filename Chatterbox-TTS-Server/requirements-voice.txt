@@ -1,7 +1,0 @@
-# Add-ons for the isolated MOSS VoiceGenerator environment.
-# MOSS-TTS owns its own torch, torchaudio, transformers and scipy versions
-# through its official [torch-runtime] extra. Do not override them here.
-speechbrain==1.1.0
-soundfile==0.13.1
-huggingface-hub>=0.36.0
-setuptools==80.9.0

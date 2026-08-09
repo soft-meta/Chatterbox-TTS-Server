@@ -1,9 +1,0 @@
-fastapi==0.116.1
-uvicorn[standard]==0.35.0
-pydantic==2.11.7
-python-multipart==0.0.20
-PyYAML==6.0.2
-soundfile==0.13.1
-numpy==1.26.4
-softmeta-chatterbox-v2 @ git+https://github.com/soft-meta/chatterbox-v2.git@v0.2.1
-Pillow==11.3.0
