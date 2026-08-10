@@ -3,6 +3,7 @@
 
   const MAX_TABS = 5;
   const STORAGE_KEY = 'softMetaChatterboxTabsV10';
+  const FLOATING_POSITION_KEY = 'softMetaChatterboxFloatingProgressV1';
   const THEME_KEY = 'softMetaChatterboxTheme';
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
@@ -33,8 +34,7 @@
       text: '',
       emotion_summary: null,
       advanced_tagged_text: '',
-      standard_job_id: null,
-      advanced_job_id: null,
+      auto_emotion: false,
       preset: defaults.preset || 'Motivational Speech',
       language: defaults.language || 'en',
       voice_mode: 'clone',
@@ -104,8 +104,9 @@
   function shouldAutoEmotion(tab) {
     const model = $('#active-model')?.value || state.initial?.active_model || '';
     return model === 'chatterbox-turbo'
+      && tab?.auto_emotion === true
       && tab?.preset === 'Motivational Speech'
-      && countWords(tab?.text || '') >= 25;
+      && countWords(tab?.text || '') >= 4;
   }
 
   function emotionSummaryText(summary) {
@@ -127,7 +128,7 @@
     const resets = Number(summary.retention_reset_count || 0) > 0 ? ` • ${summary.retention_reset_count} retention reset${summary.retention_reset_count === 1 ? '' : 's'}` : '';
     const confidence = Number(summary.high_confidence_count || 0) + Number(summary.medium_confidence_count || 0);
     const confidenceText = confidence ? ` • ${summary.high_confidence_count || 0} high-confidence` : '';
-    return `${summary.applied_count} audible event${summary.applied_count === 1 ? '' : 's'} planned${details}${avatarText}${confidenceText} • ${headingText} • used only by Generate Advanced Audio`;
+    return `${summary.applied_count} audible event${summary.applied_count === 1 ? '' : 's'} planned${details}${avatarText}${confidenceText} • ${headingText} • used by Auto Emotion during Generate Audio`;
   }
 
   function renderEmotionStatus(tab, message = null) {
@@ -140,7 +141,7 @@
       return;
     }
     box.classList.remove('hidden');
-    if (badge) badge.textContent = tab.emotion_summary ? 'Advanced Emotion Ready' : 'Advanced Emotion Plan';
+    if (badge) badge.textContent = tab.emotion_summary ? 'Auto Emotion Ready' : 'Auto Emotion Plan';
     summary.textContent = message || emotionSummaryText(tab.emotion_summary);
   }
 
@@ -164,6 +165,11 @@
     if (existing) clearTimeout(existing);
     if (!shouldAutoEmotion(tab)) {
       tab.emotion_summary = null;
+      tab.advanced_tagged_text = '';
+      const details = tab?.panel?.querySelector('[data-role="advanced-tag-details"]');
+      const preview = tab?.panel?.querySelector('[data-role="advanced-tag-preview"]');
+      if (details) details.classList.add('hidden');
+      if (preview) preview.textContent = '';
       renderEmotionStatus(tab);
       return;
     }
@@ -215,54 +221,53 @@
     scheduleEmotionAnalysis(tab, { immediate: true });
   }
 
-  function updateAdvancedButtonState(tab) {
+  function updateAutoEmotionToggleState(tab) {
     if (!tab?.panel) return;
-    const button = tab.panel.querySelector('[data-action="generate-advanced"]');
+    const button = tab.panel.querySelector('[data-action="toggle-auto-emotion"]');
     if (!button) return;
     const model = $('#active-model')?.value || state.initial?.active_model || '';
     const turbo = model === 'chatterbox-turbo';
+    if (!turbo && tab.auto_emotion) {
+      tab.auto_emotion = false;
+      tab.emotion_summary = null;
+      tab.advanced_tagged_text = '';
+    }
+    const enabled = turbo && tab.auto_emotion === true;
     button.disabled = !turbo;
-    button.title = turbo
-      ? 'Generate with Turbo Human Performance and the professional pipeline.'
-      : 'Advanced Audio is temporarily Turbo-only. Original remains unchanged.';
+    button.classList.toggle('is-on', enabled);
+    button.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+    button.title = !turbo
+      ? 'Auto Emotion is available only for Chatterbox Turbo.'
+      : enabled
+        ? 'Auto Emotion is on. Click to turn it off.'
+        : 'Auto Emotion is off. Click to enable it.';
     const eventTools = tab.panel.querySelector('[data-role="turbo-event-tools"]');
     if (eventTools) {
       eventTools.classList.toggle('disabled', !turbo);
       eventTools.querySelectorAll('button').forEach(item => { item.disabled = !turbo; });
     }
+    renderEmotionStatus(tab);
   }
 
-  function renderABComparison(tab) {
+  function toggleAutoEmotion(tab) {
     if (!tab?.panel) return;
-    const section = tab.panel.querySelector('[data-role="ab-compare"]');
-    if (!section) return;
-    const standardJob = tab.standard_job_id ? state.jobs.get(tab.standard_job_id) : null;
-    const advancedJob = tab.advanced_job_id ? state.jobs.get(tab.advanced_job_id) : null;
-    const standardReady = standardJob?.status === 'completed';
-    const advancedReady = advancedJob?.status === 'completed';
-    section.classList.toggle('hidden', !standardReady && !advancedReady);
-
-    const bind = (kind, job, ready) => {
-      const player = tab.panel.querySelector(`[data-role="${kind}-compare-player"]`);
-      const download = tab.panel.querySelector(`[data-role="${kind}-compare-download"]`);
-      if (!player || !download) return;
-      if (ready) {
-        const url = `/api/jobs/${job.id}/audio`;
-        if (player.dataset.jobId !== job.id) {
-          player.src = url;
-          player.dataset.jobId = job.id;
-        }
-        download.href = `${url}?download=true`;
-        download.download = '';
-        download.classList.remove('hidden');
-      } else {
-        player.removeAttribute('src');
-        player.dataset.jobId = '';
-        download.classList.add('hidden');
-      }
-    };
-    bind('standard', standardJob, standardReady);
-    bind('advanced', advancedJob, advancedReady);
+    const model = $('#active-model')?.value || state.initial?.active_model || '';
+    if (model !== 'chatterbox-turbo') {
+      toast('Auto Emotion is available only for Chatterbox Turbo.', 'error');
+      return;
+    }
+    tab.auto_emotion = !tab.auto_emotion;
+    if (!tab.auto_emotion) {
+      tab.emotion_summary = null;
+      tab.advanced_tagged_text = '';
+      const details = tab.panel.querySelector('[data-role="advanced-tag-details"]');
+      const preview = tab.panel.querySelector('[data-role="advanced-tag-preview"]');
+      if (details) details.classList.add('hidden');
+      if (preview) preview.textContent = '';
+    }
+    updateAutoEmotionToggleState(tab);
+    saveTabs();
+    if (tab.auto_emotion) scheduleEmotionAnalysis(tab, { immediate: true });
   }
 
   function formatTime(seconds, precise = false) {
@@ -479,8 +484,7 @@
     renderEmotionStatus(tab);
     const job = tab.job_id ? state.jobs.get(tab.job_id) : null;
     if (job?.status === 'completed') showGenerated(tab, job);
-    renderABComparison(tab);
-    updateAdvancedButtonState(tab);
+    updateAutoEmotionToggleState(tab);
   }
 
   function captureTab(tab) {
@@ -691,8 +695,8 @@
       updateCutSummary(tab);
     });
 
-    panel.querySelector('[data-action="generate-standard"]').addEventListener('click', () => generateOne(tab, 'standard'));
-    panel.querySelector('[data-action="generate-advanced"]').addEventListener('click', () => generateOne(tab, 'advanced'));
+    panel.querySelector('[data-action="generate-audio"]').addEventListener('click', () => generateOne(tab));
+    panel.querySelector('[data-action="toggle-auto-emotion"]').addEventListener('click', () => toggleAutoEmotion(tab));
     $$('[data-event-tag]', panel).forEach(button => button.addEventListener('click', () => insertTurboEventTag(tab, button.dataset.eventTag)));
     panel.querySelector('[data-role="voice-upload"]').addEventListener('change', event => uploadVoice(tab, event.target.files[0]));
     panel.querySelector('[data-action="refresh-voices"]').addEventListener('click', () => refreshVoices(tab));
@@ -754,11 +758,12 @@
     };
   }
 
-  function jobPayload(tab, generationMode = 'advanced') {
+  function jobPayload(tab) {
     captureTab(tab);
     return {
       preset: tab.preset,
-      generation_mode: generationMode,
+      generation_mode: 'advanced',
+      auto_emotion: Boolean(tab.auto_emotion),
       audio_number: tab.number,
       title: tab.title,
       text: tab.text,
@@ -778,23 +783,21 @@
     return '';
   }
 
-  async function generateOne(tab, generationMode = 'standard') {
+  async function generateOne(tab) {
     const errorMessage = validateTab(tab);
     if (errorMessage) {
       toast(errorMessage, 'error');
       return;
     }
-    const button = tab.panel.querySelector(`[data-action="generate-${generationMode}"]`);
+    const button = tab.panel.querySelector('[data-action="generate-audio"]');
     button.disabled = true;
     try {
       const job = await api('/api/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(jobPayload(tab, generationMode)),
+        body: JSON.stringify(jobPayload(tab)),
       });
       tab.job_id = job.id;
-      if (generationMode === 'standard') tab.standard_job_id = job.id;
-      if (generationMode === 'advanced') tab.advanced_job_id = job.id;
       state.jobs.set(job.id, job);
       saveTabs();
       renderActive();
@@ -831,7 +834,7 @@
       const jobs = await api('/api/jobs/generate-all', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jobs: ready.map(tab => jobPayload(tab, 'advanced')) }),
+        body: JSON.stringify({ jobs: ready.map(tab => jobPayload(tab)) }),
       });
       jobs.forEach((job, index) => {
         const tab = ready[index];
@@ -958,7 +961,6 @@
       state.tabs.forEach(tab => {
         const job = tab.job_id ? state.jobs.get(tab.job_id) : null;
         if (job?.status === 'completed') showGenerated(tab, job);
-        renderABComparison(tab);
       });
       renderActive();
       renderQueue();
@@ -977,6 +979,7 @@
 
   function monitorJobList() {
     return [...state.jobs.values()]
+      .filter(job => !job.monitor_dismissed)
       .sort((a, b) => (b.created_at || 0) - (a.created_at || 0))
       .slice(0, 20);
   }
@@ -1011,16 +1014,28 @@
       const titleBox = document.createElement('div');
       const audioLabel = document.createElement('div');
       audioLabel.className = 'queue-audio-label';
-      const modeLabel = job.generation_mode === 'standard' ? 'Standard Turbo' : 'Advanced';
-      audioLabel.textContent = `Audio ${job.audio_number} • ${modeLabel}`;
+      audioLabel.textContent = `Audio ${job.audio_number}`;
       const title = document.createElement('div');
       title.className = 'queue-title';
       title.textContent = job.title || `Audio ${job.audio_number}`;
       titleBox.append(audioLabel, title);
+      const statusWrap = document.createElement('div');
+      statusWrap.className = 'queue-status-wrap';
       const status = document.createElement('span');
       status.className = `queue-status ${job.status}`;
       status.textContent = job.status;
-      head.append(titleBox, status);
+      statusWrap.append(status);
+      if (['completed', 'failed', 'cancelled', 'interrupted'].includes(job.status)) {
+        const removeHistory = document.createElement('button');
+        removeHistory.type = 'button';
+        removeHistory.className = 'queue-remove-history';
+        removeHistory.textContent = '×';
+        removeHistory.title = 'Remove this card from queue history';
+        removeHistory.setAttribute('aria-label', `Remove Audio ${job.audio_number} from queue history`);
+        removeHistory.addEventListener('click', () => dismissQueueHistory(job));
+        statusWrap.append(removeHistory);
+      }
+      head.append(titleBox, statusWrap);
 
       const meta = document.createElement('div');
       meta.className = 'queue-meta';
@@ -1102,6 +1117,17 @@
     }
   }
 
+  async function dismissQueueHistory(job) {
+    try {
+      const updated = await api(`/api/jobs/${job.id}/dismiss-monitor`, { method: 'POST' });
+      state.jobs.set(job.id, updated);
+      renderQueue();
+      updateFloating();
+    } catch (error) {
+      toast(error.message, 'error');
+    }
+  }
+
   function openMonitor() {
     state.monitorOpen = true;
     state.monitorMinimised = false;
@@ -1130,11 +1156,103 @@
       return;
     }
     button.classList.remove('hidden');
+    const percent = Math.max(0, Math.min(100, Number(active.percent || 0)));
     button.innerHTML = `
-      <strong>Audio ${active.audio_number} • ${active.status}</strong>
-      <span>${Number(active.percent || 0).toFixed(1)}% generated • Words ${active.display_words || 0} of ${active.total_words || 0}</span>
-      <span>ETA ${humanDuration(active.eta_seconds)}</span>
+      <div class="floating-progress-head">
+        <strong>Audio ${active.audio_number} • ${active.status}</strong>
+        <span class="floating-progress-percent">${percent.toFixed(1)}%</span>
+      </div>
+      <div class="floating-progress-track" aria-hidden="true"><span class="floating-progress-fill" style="width:${percent}%"></span></div>
+      <span>Words ${active.display_words || 0} of ${active.total_words || 0} • ETA ${humanDuration(active.eta_seconds)}</span>
     `;
+    applyFloatingProgressPosition();
+  }
+
+  function readFloatingProgressPosition() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(FLOATING_POSITION_KEY) || 'null');
+      if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top)) return saved;
+    } catch (_) {
+      localStorage.removeItem(FLOATING_POSITION_KEY);
+    }
+    return null;
+  }
+
+  function clampFloatingPosition(left, top) {
+    const button = $('#floating-progress');
+    const margin = 10;
+    const width = button.offsetWidth || 340;
+    const height = button.offsetHeight || 94;
+    return {
+      left: Math.max(margin, Math.min(window.innerWidth - width - margin, left)),
+      top: Math.max(margin, Math.min(window.innerHeight - height - margin, top)),
+    };
+  }
+
+  function applyFloatingProgressPosition() {
+    const button = $('#floating-progress');
+    if (!button || button.classList.contains('hidden')) return;
+    const saved = readFloatingProgressPosition();
+    if (!saved) {
+      button.style.left = '';
+      button.style.top = '';
+      button.style.right = '18px';
+      button.style.bottom = '18px';
+      return;
+    }
+    const position = clampFloatingPosition(saved.left, saved.top);
+    button.style.right = 'auto';
+    button.style.bottom = 'auto';
+    button.style.left = `${position.left}px`;
+    button.style.top = `${position.top}px`;
+  }
+
+  function wireFloatingProgressDrag() {
+    const button = $('#floating-progress');
+    if (!button || button.dataset.dragReady === '1') return;
+    button.dataset.dragReady = '1';
+    button.addEventListener('pointerdown', event => {
+      if (event.button !== undefined && event.button !== 0) return;
+      const rect = button.getBoundingClientRect();
+      state.floatingDrag = {
+        pointerId: event.pointerId,
+        startX: event.clientX, startY: event.clientY,
+        offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top,
+        moved: false,
+      };
+      button.setPointerCapture?.(event.pointerId);
+      button.classList.add('dragging');
+    });
+    button.addEventListener('pointermove', event => {
+      const drag = state.floatingDrag;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 4) drag.moved = true;
+      if (!drag.moved) return;
+      event.preventDefault();
+      const position = clampFloatingPosition(event.clientX - drag.offsetX, event.clientY - drag.offsetY);
+      button.style.right = 'auto';
+      button.style.bottom = 'auto';
+      button.style.left = `${position.left}px`;
+      button.style.top = `${position.top}px`;
+    });
+    button.addEventListener('pointerup', event => {
+      const drag = state.floatingDrag;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      state.floatingDrag = null;
+      button.classList.remove('dragging');
+      button.releasePointerCapture?.(event.pointerId);
+      if (drag.moved) {
+        state.floatingSuppressClick = true;
+        const rect = button.getBoundingClientRect();
+        const position = clampFloatingPosition(rect.left, rect.top);
+        localStorage.setItem(FLOATING_POSITION_KEY, JSON.stringify(position));
+        setTimeout(() => { state.floatingSuppressClick = false; }, 0);
+      }
+    });
+    button.addEventListener('pointercancel', () => {
+      state.floatingDrag = null;
+      button.classList.remove('dragging');
+    });
   }
 
   async function savePerformanceFeedback(tab) {
@@ -1199,13 +1317,16 @@
       const warningChunks = Number(q.warning_chunks || 0);
       const warningText = warningChunks ? ` • ${warningChunks} accepted with ASR warning` : '';
       const p = job.prosody_summary;
-      const prosodyText = p ? ` • Prosody ${p.score}/100 ${p.rating} • first 5m ${p.avatar_tags}/${p.avatar_target_tags} emotion beats • LRA ${p.lra_lu} LU • max emotion gap ${p.max_avatar_emotion_gap_seconds}s` : '';
+      const emotionProsody = p?.auto_emotion_enabled
+        ? ` • first 5m ${p.avatar_tags}/${p.avatar_target_tags} emotion beats • max emotion gap ${p.max_avatar_emotion_gap_seconds}s`
+        : ' • Auto Emotion off';
+      const prosodyText = p ? ` • Prosody ${p.score}/100 ${p.rating}${emotionProsody} • LRA ${p.lra_lu} LU` : '';
       qualityBox.textContent = `Production QC • score ${q.average_score ?? '?'} • ${q.checked_chunks} chunks checked • ${q.retries} focused retries${warningText} • ${wer} • ${speaker}${prosodyText}`;
     } else if (qualityBox) {
       qualityBox.classList.add('hidden');
     }
-    const modeText = job.generation_mode === 'standard' ? 'Standard Turbo baseline' : 'Advanced professional pipeline';
-    panel.querySelector('[data-role="generation-meta"]').textContent = `Generation time ${humanDuration(job.elapsed_seconds)} • Duration ${formatTime(job.actual_audio_seconds || 0)} • ${modeText}`;
+    const emotionText = job.auto_emotion ? ' • Auto Emotion on' : ' • Auto Emotion off';
+    panel.querySelector('[data-role="generation-meta"]').textContent = `Generation time ${humanDuration(job.elapsed_seconds)} • Duration ${formatTime(job.actual_audio_seconds || 0)} • Professional pipeline${emotionText}`;
 
     if (!tab.waveform || tab.waveform.jobId !== job.id) {
       await loadWaveform(tab, job.id);
@@ -1538,7 +1659,7 @@
       $('#model-badge').textContent = info?.badge || 'Model';
       state.tabs.forEach(tab => {
         scheduleEmotionAnalysis(tab, { immediate: true });
-        updateAdvancedButtonState(tab);
+        updateAutoEmotionToggleState(tab);
       });
       renderActive();
     });
@@ -1557,7 +1678,10 @@
     $('#open-monitor').addEventListener('click', openMonitor);
     $('#close-monitor').addEventListener('click', closeMonitor);
     $('#minimise-monitor').addEventListener('click', minimiseMonitor);
-    $('#floating-progress').addEventListener('click', openMonitor);
+    wireFloatingProgressDrag();
+    $('#floating-progress').addEventListener('click', () => {
+      if (!state.floatingSuppressClick) openMonitor();
+    });
     $('#progress-modal').addEventListener('click', event => {
       if (event.target === $('#progress-modal')) closeMonitor();
     });
@@ -1566,6 +1690,9 @@
     schedulePoll(200);
   }
 
-  window.addEventListener('resize', () => state.tabs.forEach(drawWave));
+  window.addEventListener('resize', () => {
+    state.tabs.forEach(drawWave);
+    applyFloatingProgressPosition();
+  });
   window.addEventListener('DOMContentLoaded', init);
 })();

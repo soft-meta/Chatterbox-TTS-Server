@@ -554,28 +554,43 @@ class QueueManager:
         if effective_options.get("model") != "chatterbox-turbo" and generation_mode == "standard":
             generation_mode = "advanced"
 
-        # Standard Turbo is deliberately byte-for-text faithful: no auto tags,
-        # pronunciation rewrite, punctuation rewrite, chunk planner or SoftMeta text
-        # cleanup. What the creator sees in the textarea is what Turbo receives.
+        # v1.5.7 has one creator-facing Generate Audio path: the professional
+        # pipeline. Auto Emotion is an independent opt-in control. When it is off,
+        # the same clear-speech / pacing / mastering pipeline runs without inserting
+        # any automatic Turbo event tags. Original remains on its frozen legacy path.
         generation_text = request.text
         emotion_summary: dict[str, Any] | None = None
+        auto_emotion = bool(
+            request.auto_emotion
+            and generation_mode == "advanced"
+            and request.preset == "Motivational Speech"
+            and effective_options.get("model") == "chatterbox-turbo"
+        )
         if (
             generation_mode == "advanced"
             and request.preset == "Motivational Speech"
             and effective_options.get("model") in PROFESSIONAL_MODELS
         ):
-            emotion_analysis = (
-                analyze_turbo_avatar_performance(request.text)
-                if effective_options.get("model") == "chatterbox-turbo"
-                else analyze_serious_senior_advisor(request.text)
-            )
-            pronounced = prepare_pronunciation_text(emotion_analysis.tagged_text)
-            generation_text = prepare_senior_clear_speech_text(pronounced)
-            emotion_summary = emotion_analysis.public_summary(include_text=False)
+            if effective_options.get("model") == "chatterbox-turbo":
+                source_text = request.text
+                if auto_emotion:
+                    emotion_analysis = analyze_turbo_avatar_performance(request.text)
+                    source_text = emotion_analysis.tagged_text
+                    emotion_summary = emotion_analysis.public_summary(include_text=False)
+                pronounced = prepare_pronunciation_text(source_text)
+                generation_text = prepare_senior_clear_speech_text(pronounced)
+            else:
+                # Chatterbox Original is intentionally unchanged from v1.5.6.
+                emotion_analysis = analyze_serious_senior_advisor(request.text)
+                pronounced = prepare_pronunciation_text(emotion_analysis.tagged_text)
+                generation_text = prepare_senior_clear_speech_text(pronounced)
+                emotion_summary = emotion_analysis.public_summary(include_text=False)
         job = {
             "id": job_id,
             "preset": request.preset,
             "generation_mode": generation_mode,
+            "auto_emotion": auto_emotion,
+            "monitor_dismissed": False,
             "audio_number": request.audio_number,
             "title": request.title.strip(),
             "text": request.text,
@@ -634,6 +649,20 @@ class QueueManager:
             self._signal(job_id)
         else:
             job["stage"] = "Cancellation requested; waiting for the current model pass"
+        self._persist(force=True)
+        return self.public_job(job)
+
+    async def dismiss_from_monitor(self, job_id: str) -> dict[str, Any]:
+        """Hide one finished card from Queue Monitor without deleting its audio.
+
+        The creator may still be using the generated WAV in the Audio workspace, so
+        Queue Monitor cleanup must not orphan that player/download. The dismissed
+        flag is persisted with the job and survives browser reloads.
+        """
+        job = self.get_raw(job_id)
+        if job.get("status") in ACTIVE_STATES:
+            raise RuntimeError("Active jobs cannot be removed from history. Wait for generation or cancel the job first.")
+        job["monitor_dismissed"] = True
         self._persist(force=True)
         return self.public_job(job)
 

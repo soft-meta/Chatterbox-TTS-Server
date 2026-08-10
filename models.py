@@ -37,6 +37,7 @@ class GenerationOptions(BaseModel):
 class AudioJobCreate(BaseModel):
     preset: str | None = None
     generation_mode: Literal["standard", "advanced"] = "advanced"
+    auto_emotion: bool = False
     audio_number: int = Field(1, ge=1, le=5)
     title: str = Field("", max_length=180)
     text: str = Field(..., min_length=1)

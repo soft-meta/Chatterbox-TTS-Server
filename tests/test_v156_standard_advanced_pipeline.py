@@ -46,6 +46,7 @@ def _request(text: str, mode: str) -> AudioJobCreate:
     return AudioJobCreate(
         preset="Motivational Speech",
         generation_mode=mode,
+        auto_emotion=(mode == "advanced"),
         audio_number=1,
         title=f"{mode} comparison",
         text=text,
@@ -149,19 +150,18 @@ def test_advanced_auto_events_reach_turbo_engine_calls(tmp_path: Path, monkeypat
     assert len(engine.calls) > 1  # advanced path is segmented/directed
 
 
-def test_ui_exposes_two_generation_buttons_and_side_by_side_comparison() -> None:
+def test_ui_exposes_single_professional_generate_button_and_opt_in_auto_emotion() -> None:
     root = Path(__file__).resolve().parents[1]
     html = (root / "ui" / "index.html").read_text(encoding="utf-8")
     js = (root / "ui" / "app.js").read_text(encoding="utf-8")
-    assert 'data-action="generate-standard"' in html
-    assert '>Generate Audio<' in html.replace("\n", "")
-    assert 'data-action="generate-advanced"' in html
-    assert '>Generate Advanced Audio<' in html.replace("\n", "")
-    assert 'data-role="standard-compare-player"' in html
-    assert 'data-role="advanced-compare-player"' in html
-    assert "generateOne(tab, 'standard')" in js
-    assert "generateOne(tab, 'advanced')" in js
-    assert "generation_mode: generationMode" in js
+    assert 'data-action="generate-audio"' in html
+    assert 'data-action="generate-standard"' not in html
+    assert 'data-action="generate-advanced"' not in html
+    assert 'Generate Advanced Audio' not in html
+    assert 'data-action="toggle-auto-emotion"' in html
+    assert "generateOne(tab)" in js
+    assert "generation_mode: 'advanced'" in js
+    assert "auto_emotion: Boolean(tab.auto_emotion)" in js
 
 
 def test_original_generate_audio_request_is_coerced_to_existing_advanced_path(tmp_path: Path) -> None:

@@ -369,6 +369,7 @@ def analyze_prosody_quality(
         longest_flat = max(longest_flat, current_flat)
         previous = value
 
+    auto_emotion_enabled = emotion_summary is not None
     summary = emotion_summary or {}
     placements = list(summary.get("placements") or [])
     total_words = max(1, int(summary.get("total_words") or 1))
@@ -383,21 +384,28 @@ def analyze_prosody_quality(
             cue_times.append(estimated_time)
     cue_times = sorted(set(round(value, 3) for value in cue_times))
     avatar_tag_count = len(cue_times)
-    avatar_target = max(1, int(summary.get("avatar_target_count") or min(10, max(2, round(total_words / 120)))))
-    anchors = [0.0] + cue_times + [avatar_seconds]
-    max_gap = max((b - a for a, b in zip(anchors, anchors[1:])), default=avatar_seconds)
-
-    emotion_points = 30.0 * min(avatar_tag_count / max(avatar_target, 1), 1.0)
-    if max_gap <= 45:
-        gap_points = 20.0
-    elif max_gap <= 60:
-        gap_points = 17.0
-    elif max_gap <= 75:
-        gap_points = 13.0
-    elif max_gap <= 100:
-        gap_points = 8.0
+    if auto_emotion_enabled:
+        avatar_target = max(1, int(summary.get("avatar_target_count") or min(10, max(2, round(total_words / 120)))))
+        anchors = [0.0] + cue_times + [avatar_seconds]
+        max_gap = max((b - a for a, b in zip(anchors, anchors[1:])), default=avatar_seconds)
+        emotion_points = 30.0 * min(avatar_tag_count / max(avatar_target, 1), 1.0)
+        if max_gap <= 45:
+            gap_points = 20.0
+        elif max_gap <= 60:
+            gap_points = 17.0
+        elif max_gap <= 75:
+            gap_points = 13.0
+        elif max_gap <= 100:
+            gap_points = 8.0
+        else:
+            gap_points = 3.0
     else:
-        gap_points = 3.0
+        # Auto Emotion is deliberately optional in v1.5.7. Do not punish a creator
+        # for turning it off; score the acoustic prosody/mastering on its own.
+        avatar_target = 0
+        max_gap = 0.0
+        emotion_points = 0.0
+        gap_points = 0.0
     if 4.0 <= lra <= 7.5:
         lra_points = 25.0
     elif lra > 7.5:
@@ -413,13 +421,22 @@ def analyze_prosody_quality(
         flat_points = 5.0
     else:
         flat_points = 2.0
-    score = float(np.clip(emotion_points + gap_points + lra_points + movement_points + flat_points, 0.0, 100.0))
+    if auto_emotion_enabled:
+        score = float(np.clip(emotion_points + gap_points + lra_points + movement_points + flat_points, 0.0, 100.0))
+    else:
+        score = float(np.clip(
+            (lra_points / 25.0) * 45.0
+            + (movement_points / 15.0) * 35.0
+            + (flat_points / 10.0) * 20.0,
+            0.0, 100.0,
+        ))
     rating = "excellent" if score >= 85 else "strong" if score >= 75 else "good" if score >= 65 else "needs more movement"
     return {
         "score": round(score, 1),
         "rating": rating,
         "duration_seconds": round(duration, 2),
         "avatar_seconds": round(avatar_seconds, 2),
+        "auto_emotion_enabled": auto_emotion_enabled,
         "avatar_tags": avatar_tag_count,
         "avatar_target_tags": avatar_target,
         "max_avatar_emotion_gap_seconds": round(max_gap, 1),

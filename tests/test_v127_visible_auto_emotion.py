@@ -66,7 +66,10 @@ def test_frontend_keeps_creator_script_raw_and_previews_advanced_events_separate
     assert "applyVisibleEmotionResult" in source
     assert "tab.advanced_tagged_text = result.tagged_text" in source
     assert "preview.textContent = result.tagged_text" in source
-    assert "Generate Advanced Audio" in (ROOT / "ui" / "index.html").read_text(encoding="utf-8")
+    html = (ROOT / "ui" / "index.html").read_text(encoding="utf-8")
+    assert "Generate Audio" in html
+    assert "Auto Emotion" in html
+    assert "Generate Advanced Audio" not in html
     assert "analysis.public_summary(include_text=True)" in server
 
 
@@ -88,6 +91,7 @@ def test_backend_recomputes_same_canonical_tagged_script_used_by_ui() -> None:
         title="Visible Emotion Test",
         text=result.tagged_text,
         voice_mode="default",
+        auto_emotion=True,
         options=GenerationOptions(model="chatterbox-turbo"),
     )
     job = asyncio.run(manager.create(request, enqueue=False))

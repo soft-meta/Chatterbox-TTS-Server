@@ -42,7 +42,7 @@ def test_turbo_plans_semantic_audible_events_without_changing_original_planner()
     assert original.avatar_applied_count == 0
 
     assert turbo.mode == "Turbo Human Performance Events"
-    assert 2 <= turbo.avatar_target_count <= 7
+    assert 2 <= turbo.avatar_target_count <= 10
     assert turbo.avatar_applied_count >= 4
     assert turbo.applied_count - turbo.avatar_applied_count <= 2
     assert set(turbo.by_tag).issubset({
@@ -107,8 +107,8 @@ def test_v155_is_turbo_first_in_server_ui_and_colab() -> None:
     assert DEFAULT_CONFIG["tts_engine"]["default_model"] == "chatterbox-turbo"
     app = (ROOT / "ui" / "app.js").read_text(encoding="utf-8")
     server = (ROOT / "server.py").read_text(encoding="utf-8")
-    notebook = (ROOT / "colab" / "SoftMeta_Chatterbox_TTS_Colab_v1.5.6.ipynb").read_text(encoding="utf-8")
+    notebook = (ROOT / "colab" / "SoftMeta_Chatterbox_TTS_Colab_v1.5.7.ipynb").read_text(encoding="utf-8")
     assert "model === 'chatterbox-turbo'" in app
     assert "analyze_turbo_avatar_performance" in server
-    assert 'APP_VERSION = "1.5.6"' in server
+    assert 'APP_VERSION = "1.5.7"' in server
     assert '\\"SOFTMETA_MODEL\\": \\"chatterbox-turbo\\"' in notebook

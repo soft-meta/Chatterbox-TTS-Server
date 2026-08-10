@@ -33,7 +33,7 @@ from storage import AUDIO_EXTENSIONS, Storage
 from utils import safe_filename
 
 APP_NAME = "SoftMeta Chatterbox TTS Server"
-APP_VERSION = "1.5.6"
+APP_VERSION = "1.5.7"
 logger = logging.getLogger("softmeta.chatterbox")
 
 config = load_config()
@@ -368,6 +368,16 @@ async def cancel_job(job_id: str) -> dict[str, Any]:
         return await queue.cancel(job_id)
     except KeyError as error:
         raise HTTPException(404, "Job not found.") from error
+
+
+@app.post("/api/jobs/{job_id}/dismiss-monitor")
+async def dismiss_job_from_monitor(job_id: str) -> dict[str, Any]:
+    try:
+        return await queue.dismiss_from_monitor(job_id)
+    except KeyError as error:
+        raise HTTPException(404, "Job not found.") from error
+    except RuntimeError as error:
+        raise HTTPException(409, str(error)) from error
 
 
 @app.delete("/api/jobs")

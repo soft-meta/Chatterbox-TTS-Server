@@ -703,14 +703,15 @@ def analyze_turbo_avatar_performance(
                 score += 0.30 * (1.0 - sentence.start_word / max(avatar_window_words, 1))
             candidates.append(_Candidate(sentence, tag, score, "audible-event"))
 
-    # Audible non-speech events should be more frequent than v1.5.5's abstract tags,
-    # but still human.  A full five-minute avatar section tops out at seven automatic
-    # events.  Manual user tags do not consume semantic validity; they are always kept.
+    # Medium-density human performance. A full five-minute avatar section aims for
+    # about ten *semantic* events when the script genuinely contains enough moments.
+    # The B-roll tail stays calmer. This is a ceiling/target, never a quota: neutral
+    # advice receives no fabricated laughter, sighs or gasps.
     if total_words < 70:
         avatar_target = 1 if candidates else 0
     else:
-        avatar_target = min(7, max(2, math.ceil(max(avatar_window_words, 1) / 115.0)))
-    tail_target = min(2, max(0, math.ceil(max(total_words - avatar_window_words, 0) / 300.0)))
+        avatar_target = min(10, max(2, math.ceil(max(avatar_window_words, 1) / 80.0)))
+    tail_target = min(2, max(0, math.ceil(max(total_words - avatar_window_words, 0) / 220.0)))
 
     selected: list[_Candidate] = list(manual_candidates)
     selected_keys = {(c.sentence.line_index, c.sentence.sentence_index) for c in selected}
@@ -720,7 +721,7 @@ def analyze_turbo_avatar_performance(
 
     # Prevent the output from becoming a sound-effects reel. Laugh is especially rare;
     # sigh/chuckle can recur with adequate spacing, gasp stays sparse.
-    limits = {"laugh": 2, "chuckle": 3, "sigh": 4, "gasp": 3}
+    limits = {"laugh": 2, "chuckle": 4, "sigh": 5, "gasp": 4}
 
     def in_avatar(c: _Candidate) -> bool:
         return c.sentence.start_word < avatar_window_words
@@ -733,9 +734,9 @@ def analyze_turbo_avatar_performance(
             return False
         pos = c.sentence.start_word
         peers = [x for x in selected if (x.sentence.start_word < avatar_window_words) == front]
-        if any(abs(pos - x.sentence.start_word) < 52 for x in peers):
+        if any(abs(pos - x.sentence.start_word) < 42 for x in peers):
             return False
-        if any(c.tag == x.tag and abs(pos - x.sentence.start_word) < 105 for x in peers):
+        if any(c.tag == x.tag and abs(pos - x.sentence.start_word) < 84 for x in peers):
             return False
         return True
 
@@ -808,7 +809,12 @@ def analyze_turbo_avatar_performance(
                 continue
             if chosen.source == "manual-event":
                 rendered.append(sentence.text)
+            elif chosen.tag in {"laugh", "chuckle"}:
+                # Positive vocal reactions sound more human after the line that caused
+                # the reaction, matching the placement style used in upstream examples.
+                rendered.append(f"{sentence.text} [{chosen.tag}]")
             else:
+                # A sigh or gasp naturally leads into the reflective/surprising line.
                 rendered.append(f"[{chosen.tag}] {sentence.text}")
             placements.append({
                 "tag": chosen.tag,

@@ -165,6 +165,7 @@ def test_turbo_keeps_native_tags_and_original_uses_local_native_controls(tmp_pat
             title=f"emotion {model}",
             text=_emotion_script(),
             voice_mode="default",
+            auto_emotion=(model == "chatterbox-turbo"),
             options=GenerationOptions(model=model, split_text=True, chunk_words=85, platform_assets=False),
         )
         public = await manager.create(request, enqueue=False)
