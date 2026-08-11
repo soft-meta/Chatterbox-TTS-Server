@@ -33,7 +33,7 @@ from storage import AUDIO_EXTENSIONS, Storage
 from utils import safe_filename
 
 APP_NAME = "SoftMeta Chatterbox TTS Server"
-APP_VERSION = "1.5.7"
+APP_VERSION = "1.5.10"
 logger = logging.getLogger("softmeta.chatterbox")
 
 config = load_config()
@@ -400,23 +400,70 @@ async def remove_job(job_id: str, delete_file: bool = True) -> dict[str, Any]:
     return {"ok": True}
 
 
-@app.get("/api/jobs/{job_id}/audio")
-def job_audio(job_id: str, download: bool = False) -> FileResponse:
+def _attachment_response(path: Path, *, media_type: str | None = None) -> FileResponse:
+    """Return a browser download response that remains reliable behind Colab proxies.
+
+    The studio previously depended on the HTML ``download`` attribute and on the
+    static ``/outputs`` mount. Some browser/proxy combinations ignore that hint.
+    A server-enforced Content-Disposition attachment makes the download intent
+    explicit and consistent for full WAVs, cuts and generated assets.
+    """
+    return FileResponse(
+        path,
+        media_type=media_type or storage.media_type(path),
+        filename=path.name,
+        content_disposition_type="attachment",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "Accept-Ranges": "bytes",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+def _completed_job_audio_path(job_id: str) -> Path:
     try:
         job = queue.get(job_id)
     except KeyError as error:
         raise HTTPException(404, "Job not found.") from error
-    if job["status"] != "completed" or not job["output_filename"]:
+    if job["status"] != "completed" or not job.get("output_filename"):
         raise HTTPException(409, "Audio is not ready.")
     path = storage.output_path(job["output_filename"])
     if not path.is_file():
         raise HTTPException(404, "Generated audio file is missing.")
+    return path
+
+
+@app.get("/api/jobs/{job_id}/audio")
+def job_audio(job_id: str, download: bool = False) -> FileResponse:
+    path = _completed_job_audio_path(job_id)
+    if download:
+        # Backwards compatibility for older browser sessions/bookmarks.
+        return _attachment_response(path, media_type="audio/wav")
     return FileResponse(
         path,
         media_type="audio/wav",
-        filename=path.name if download else None,
+        content_disposition_type="inline",
         headers={"Cache-Control": "no-store", "Accept-Ranges": "bytes"},
     )
+
+
+@app.get("/api/jobs/{job_id}/download")
+def job_audio_download(job_id: str) -> FileResponse:
+    return _attachment_response(_completed_job_audio_path(job_id), media_type="audio/wav")
+
+
+@app.get("/api/outputs/{filename}/download")
+def download_output(filename: str) -> FileResponse:
+    try:
+        path = storage.output_path(filename)
+    except ValueError as error:
+        raise HTTPException(400, "Invalid output filename.") from error
+    if not path.is_file():
+        raise HTTPException(404, "Output file not found.")
+    return _attachment_response(path)
 
 
 @app.get("/api/jobs/{job_id}/asset/{kind}")
@@ -439,7 +486,9 @@ def job_asset(job_id: str, kind: str, download: bool = True) -> FileResponse:
     path = storage.output_path(filename)
     if not path.is_file():
         raise HTTPException(404, "Output asset not found.")
-    return FileResponse(path, media_type=storage.media_type(path), filename=path.name if download else None)
+    if download:
+        return _attachment_response(path)
+    return FileResponse(path, media_type=storage.media_type(path), content_disposition_type="inline", headers={"Cache-Control": "no-store"})
 
 
 def _waveform_peaks(path: Path, points: int) -> tuple[list[float], list[float], float]:
@@ -522,7 +571,12 @@ async def cut_audio(job_id: str, request: CutRequest) -> dict[str, Any]:
         request.start_seconds,
         request.end_seconds,
     )
-    return {"filename": filename, "duration": duration, "url": f"/outputs/{filename}"}
+    return {
+        "filename": filename,
+        "duration": duration,
+        "url": f"/outputs/{filename}",
+        "download_url": f"/api/outputs/{filename}/download",
+    }
 
 
 

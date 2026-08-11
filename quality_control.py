@@ -150,6 +150,7 @@ class QualityController:
     def __init__(self) -> None:
         self.asr_model_name = os.getenv("SOFTMETA_ASR_MODEL", "small.en")
         self._asr: Any | None = None
+        self._batched_asr: Any | None = None
         self._asr_failed = False
         self._speaker: Any | None = None
         self._speaker_failed = False
@@ -281,6 +282,226 @@ class QualityController:
             return None, False
         finally:
             generated.unlink(missing_ok=True)
+
+
+    def evaluate_acoustic(
+        self,
+        audio: np.ndarray,
+        sample_rate: int,
+        expected_text: str,
+    ) -> ChunkQualityReport:
+        """Fast per-chunk safety gate with no ASR or speaker-model inference.
+
+        The expensive semantic verifier is intentionally deferred to one batched
+        final-file pass. This keeps every generated chunk protected from objective
+        corruption (empty/invalid/mostly silent/implausible timing) without placing
+        Whisper and ECAPA between every Turbo model call.
+        """
+        expected_words = len(normalize_words(expected_text))
+        raw = np.asarray(audio)
+        invalid_sample_ratio = float(np.mean(~np.isfinite(raw))) if raw.size else 0.0
+        metrics = acoustic_metrics(audio, sample_rate, expected_words)
+        metrics["invalid_sample_ratio"] = invalid_sample_ratio
+        reasons: list[str] = []
+        hard_failure = False
+        retry_recommended = False
+
+        if raw.size == 0:
+            reasons.append("empty audio waveform")
+            hard_failure = True
+        if invalid_sample_ratio > 0.001:
+            reasons.append("invalid audio samples")
+            hard_failure = True
+        if metrics["rms_dbfs"] < -55:
+            reasons.append("unusable speech level")
+            hard_failure = True
+        elif metrics["rms_dbfs"] < -42:
+            reasons.append("very low speech level")
+            retry_recommended = True
+        if metrics["silence_ratio"] > 0.82:
+            reasons.append("mostly silent audio")
+            hard_failure = True
+        elif metrics["silence_ratio"] > 0.60:
+            reasons.append("excessive silence")
+            retry_recommended = True
+        # Speaking rate is derived from expected word count divided by waveform
+        # duration. It is useful as a drift hint, but it is not proof of corrupt
+        # audio: a short final sentence, an audible Turbo event such as [sigh], or
+        # deliberate sentence-ending pauses can legitimately make a small chunk
+        # look very slow/fast. In Fast Professional mode only objective waveform
+        # corruption may hard-stop a job. Rate therefore stays advisory.
+        if metrics["wpm"] and (metrics["wpm"] < 45 or metrics["wpm"] > 320):
+            reasons.append(
+                "short-chunk speaking-rate advisory"
+                if expected_words < 18
+                else "implausible speaking-rate advisory"
+            )
+            retry_recommended = expected_words >= 18
+        elif metrics["wpm"] and (metrics["wpm"] < 72 or metrics["wpm"] > 245):
+            reasons.append("unusual speaking rate")
+            retry_recommended = expected_words >= 18
+        if metrics["peak_dbfs"] > -0.03:
+            reasons.append("near-clipping peak")
+            retry_recommended = True
+
+        score = 100.0
+        if metrics["silence_ratio"] > 0.35:
+            score -= min(16.0, (metrics["silence_ratio"] - 0.35) * 40.0)
+        if retry_recommended:
+            score -= 4.0
+        if hard_failure:
+            score -= 25.0
+        return ChunkQualityReport(
+            passed=not hard_failure,
+            score=max(0.0, min(100.0, score)),
+            reasons=reasons,
+            metrics=metrics,
+            retry_recommended=retry_recommended or hard_failure,
+            hard_failure=hard_failure,
+        )
+
+    def _load_batched_asr(self) -> Any | None:
+        model = self._load_asr()
+        if model is None:
+            return None
+        if self._batched_asr is not None:
+            return self._batched_asr
+        try:
+            from faster_whisper import BatchedInferencePipeline
+            self._batched_asr = BatchedInferencePipeline(model=model)
+        except Exception:
+            self._batched_asr = None
+        return self._batched_asr
+
+    def transcribe_file_fast(
+        self,
+        audio_path: Path,
+        expected_text: str,
+    ) -> tuple[str, list[dict[str, Any]], bool]:
+        """One final-file ASR pass, batched when supported by faster-whisper."""
+        model = self._load_asr()
+        if model is None:
+            return "", [], False
+        clean_expected = strip_turbo_tags(expected_text)
+        kwargs = dict(
+            language="en",
+            beam_size=1,
+            temperature=0.0,
+            word_timestamps=True,
+            vad_filter=True,
+            initial_prompt=clean_expected[:800],
+            hotwords=clean_expected[:400],
+            condition_on_previous_text=False,
+        )
+        try:
+            batched = self._load_batched_asr()
+            if batched is not None:
+                try:
+                    segments, _ = batched.transcribe(str(audio_path), batch_size=8, **kwargs)
+                except Exception:
+                    # Older/limited faster-whisper builds may reject one batched
+                    # option. Fall back to a single non-batched final pass rather
+                    # than disabling verification for the whole job.
+                    segments, _ = model.transcribe(str(audio_path), **kwargs)
+            else:
+                segments, _ = model.transcribe(str(audio_path), **kwargs)
+            transcript_parts: list[str] = []
+            words: list[dict[str, Any]] = []
+            for segment in segments:
+                transcript_parts.append(str(segment.text).strip())
+                for word in getattr(segment, "words", None) or []:
+                    words.append({
+                        "start": float(word.start),
+                        "end": float(word.end),
+                        "word": str(word.word),
+                    })
+            return " ".join(part for part in transcript_parts if part).strip(), words, True
+        except Exception:
+            # Keep final delivery alive if optional ASR cannot run on this runtime.
+            return "", [], False
+
+    def evaluate_final_file(
+        self,
+        audio_path: Path,
+        expected_text: str,
+        reference_path: Path | None = None,
+        speaker_check: bool = True,
+    ) -> dict[str, Any]:
+        """Verify the complete narration once after generation/mastering.
+
+        This pass is advisory for content mismatch and speaker identity. Objective
+        waveform failures are already blocked by evaluate_acoustic() on every chunk.
+        """
+        audio, sample_rate = sf.read(audio_path, dtype="float32", always_2d=False)
+        data = np.asarray(audio, dtype=np.float32)
+        if data.ndim > 1:
+            data = np.mean(data, axis=1)
+        expected_words = len(normalize_words(expected_text))
+        metrics = acoustic_metrics(data, int(sample_rate), expected_words)
+        transcript, words, asr_available = self.transcribe_file_fast(audio_path, expected_text)
+        wer: float | None = None
+        reasons: list[str] = []
+        if asr_available and expected_words >= 5:
+            wer = word_error_rate(expected_text, transcript)
+            transcript_words = normalize_words(transcript)
+            ratio = len(transcript_words) / max(expected_words, 1)
+            coverage = ordered_word_coverage(expected_text, transcript)
+            metrics["asr_length_ratio"] = ratio
+            metrics["asr_ordered_coverage"] = coverage
+            if wer > 0.35:
+                reasons.append(f"final ASR mismatch ({wer:.0%})")
+            elif wer > 0.22:
+                reasons.append(f"final ASR advisory ({wer:.0%})")
+            if ratio < 0.70:
+                reasons.append("final ASR heard fewer words than expected")
+            elif ratio > 1.32:
+                reasons.append("final ASR heard more words than expected")
+
+        similarity: float | None = None
+        speaker_available = False
+        if speaker_check and reference_path is not None and data.size:
+            # One representative 20-second excerpt is enough to catch gross voice
+            # identity failure without running ECAPA once per TTS chunk.
+            excerpt_samples = min(data.size, int(sample_rate) * 20)
+            similarity, speaker_available = self.speaker_similarity(
+                reference_path, data[:excerpt_samples], int(sample_rate)
+            )
+            if similarity is not None and similarity < 0.02:
+                reasons.append("very low reference-speaker similarity")
+
+        score = 100.0
+        if wer is not None:
+            score -= min(35.0, wer * 75.0)
+        if similarity is not None and similarity < 0.20:
+            score -= min(18.0, (0.20 - similarity) * 90.0)
+        score = max(0.0, min(100.0, score))
+        report = ChunkQualityReport(
+            passed=True,
+            score=score,
+            reasons=reasons,
+            transcript=transcript,
+            wer=wer,
+            speaker_similarity=similarity,
+            metrics=metrics,
+            words=words,
+            asr_available=asr_available,
+            speaker_check_available=speaker_available,
+            retry_recommended=False,
+            hard_failure=False,
+        )
+        return {
+            "report": report,
+            "words": words,
+            "summary": {
+                "average_score": round(float(score), 1),
+                "average_wer": None if wer is None else round(float(wer), 3),
+                "minimum_speaker_similarity": None if similarity is None else round(float(similarity), 3),
+                "asr_verified": asr_available,
+                "speaker_verified": speaker_available,
+                "warnings": list(reasons),
+                "mode": "fast-final-pass",
+            },
+        }
 
     def evaluate(
         self,

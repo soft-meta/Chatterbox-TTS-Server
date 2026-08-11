@@ -85,6 +85,9 @@ MOTIVATIONAL_TURBO_PROFILE: dict[str, Any] = {
     # Turbo is English-only. This locks the server path to English text processing;
     # cloned accent identity can still be inherited from the reference recording.
     "language": "en",
+    # Fast Professional QC: preserve the speech/mastering pipeline but move heavy
+    # ASR + speaker verification to one final-file pass.
+    "_fast_professional_qc": True,
 }
 
 MOTIVATIONAL_TURBO_RETRY_PROFILE: dict[str, Any] = {
@@ -379,6 +382,7 @@ class QueueManager:
             "rms_dbfs": 20.0 * math.log10(max(rms, 1e-6)),
             "peak_dbfs": 20.0 * math.log10(max(peak, 1e-6)),
             "seconds_per_word": duration / max(words, 1),
+            "word_count": float(max(words, 0)),
         }
 
     @staticmethod
@@ -441,15 +445,23 @@ class QueueManager:
         """Detect obvious Turbo chunk drift without adding an ASR dependency."""
         rms_db = metrics["rms_dbfs"]
         spw = metrics["seconds_per_word"]
+        word_count = int(round(float(metrics.get("word_count", 0.0))))
+        short_span = 0 < word_count < 18
         if not math.isfinite(rms_db) or not math.isfinite(spw) or spw <= 0.0:
             return True
-        if rms_db > -6.0 or rms_db < -48.0 or spw < 0.16 or spw > 0.90:
+        if rms_db > -6.0 or rms_db < -48.0:
             return True
-        if len(history) < 2:
+        # Only absurd timing remains an absolute retry hint. Normal short-tail and
+        # native-event timing is intentionally exempt because seconds-per-word is
+        # statistically noisy on a handful of words and includes non-verbal events.
+        if spw < 0.05 or spw > 3.50:
+            return True
+        if not short_span and not intentional_emotion and (spw < 0.16 or spw > 0.90):
+            return True
+        if len(history) < 2 or short_span:
             return False
         # Native Turbo emotion tokens intentionally alter prosody. For those chunks,
-        # keep only the absolute sanity guard above; per-chunk level matching still
-        # prevents the expressive moment from becoming a volume spike.
+        # skip history-relative speaking-rate drift while keeping RMS sanity above.
         if intentional_emotion:
             return False
         recent = history[-5:]
@@ -554,7 +566,7 @@ class QueueManager:
         if effective_options.get("model") != "chatterbox-turbo" and generation_mode == "standard":
             generation_mode = "advanced"
 
-        # v1.5.7 has one creator-facing Generate Audio path: the professional
+        # v1.5.10 keeps the v1.5.7 single creator-facing Generate Audio path: the professional
         # pipeline. Auto Emotion is an independent opt-in control. When it is off,
         # the same clear-speech / pacing / mastering pipeline runs without inserting
         # any automatic Turbo event tags. Original remains on its frozen legacy path.
@@ -778,6 +790,13 @@ class QueueManager:
             and model_name in PROFESSIONAL_MODELS
         )
         professional_longform = professional_mode and options.get("split_text", True)
+        fast_professional_qc = bool(
+            professional_mode
+            and model_name == "chatterbox-turbo"
+            and options.get("_fast_professional_qc", False)
+            and callable(getattr(self.quality, "evaluate_acoustic", None))
+            and callable(getattr(self.quality, "evaluate_final_file", None))
+        )
 
         directed_segments = []
         if professional_longform:
@@ -888,6 +907,9 @@ class QueueManager:
         ) -> ChunkQualityReport | None:
             if not bool(options.get("quality_gate", True)):
                 return None
+            if fast_professional_qc:
+                # Pure waveform math; do not serialize Whisper/ECAPA between Turbo calls.
+                return self.quality.evaluate_acoustic(audio, result.sample_rate, spoken_text)
             return await loop.run_in_executor(
                 self.executor,
                 lambda: self.quality.evaluate(
@@ -1166,25 +1188,35 @@ class QueueManager:
 
                 report = None
                 if professional_mode and bool(options.get("quality_gate", True)):
-                    job["stage"] = f"Quality checking {index}/{len(chunks)}"
-                    report = await loop.run_in_executor(
-                        self.executor,
-                        lambda: self.quality.evaluate(
-                            audio,
-                            result.sample_rate,
-                            spoken_chunk,
-                            voice_path if bool(options.get("speaker_consistency", True)) else None,
-                            speaker_history,
-                        ),
-                    )
+                    if fast_professional_qc:
+                        # Cheap objective safety check only. Heavy ASR/speaker models run once
+                        # after the full Turbo narration is assembled and mastered.
+                        report = self.quality.evaluate_acoustic(audio, result.sample_rate, spoken_chunk)
+                    else:
+                        job["stage"] = f"Quality checking {index}/{len(chunks)}"
+                        report = await loop.run_in_executor(
+                            self.executor,
+                            lambda: self.quality.evaluate(
+                                audio,
+                                result.sample_rate,
+                                spoken_chunk,
+                                voice_path if bool(options.get("speaker_consistency", True)) else None,
+                                speaker_history,
+                            ),
+                        )
 
                 segment_emotion = getattr(segment, "emotion_tag", None) if segment is not None else emotion_tag_for_text(chunk)
-                needs_retry = legacy_unstable or quality_retry_needed(report, segment_emotion)
+                needs_retry = (
+                    legacy_unstable or (report is not None and report.hard_failure)
+                    if fast_professional_qc
+                    else legacy_unstable or quality_retry_needed(report, segment_emotion)
+                )
                 best_result, best_audio, best_spoken, best_metrics, best_report = result, audio, spoken_chunk, raw_metrics, report
                 if professional_mode and needs_retry:
-                    # At most two focused retries, only for the failed chunk. This raises
-                    # production reliability without making every long-form job 2–3x slower.
-                    for attempt in range(1, 3):
+                    # Turbo Fast Professional retries an objectively broken chunk once.
+                    # Legacy/Original keeps the earlier two-attempt behavior.
+                    retry_attempts = 1 if fast_professional_qc else 2
+                    for attempt in range(1, retry_attempts + 1):
                         quality_retries += 1
                         retry_options = dict(options)
                         retry_options.update(
@@ -1200,16 +1232,21 @@ class QueueManager:
                         retry_result, retry_audio, retry_spoken, retry_metrics = await render_once(chunk, segment, retry_options)
                         retry_report = None
                         if bool(options.get("quality_gate", True)):
-                            retry_report = await loop.run_in_executor(
-                                self.executor,
-                                lambda: self.quality.evaluate(
-                                    retry_audio,
-                                    retry_result.sample_rate,
-                                    retry_spoken,
-                                    voice_path if bool(options.get("speaker_consistency", True)) else None,
-                                    speaker_history,
-                                ),
-                            )
+                            if fast_professional_qc:
+                                retry_report = self.quality.evaluate_acoustic(
+                                    retry_audio, retry_result.sample_rate, retry_spoken
+                                )
+                            else:
+                                retry_report = await loop.run_in_executor(
+                                    self.executor,
+                                    lambda: self.quality.evaluate(
+                                        retry_audio,
+                                        retry_result.sample_rate,
+                                        retry_spoken,
+                                        voice_path if bool(options.get("speaker_consistency", True)) else None,
+                                        speaker_history,
+                                    ),
+                                )
                         retry_score = retry_report.score if retry_report is not None else (
                             100.0 - 12.0 * self._chunk_distance_from_history(retry_metrics, turbo_metric_history)
                         )
@@ -1248,7 +1285,7 @@ class QueueManager:
                     reason_text = "; ".join(report.reasons[:3]) or "quality verification failed"
                     raise RuntimeError(
                         f"Production Quality Gate rejected chunk {index}/{len(chunks)} after retries: {reason_text}. "
-                        "The generated speech still showed multiple signs of a real audio/content failure."
+                        "The waveform still showed an objective audio failure after the focused retry."
                     )
                 if model_name == "chatterbox-turbo":
                     turbo_metric_history.append(raw_metrics)
@@ -1339,6 +1376,31 @@ class QueueManager:
                 # Original path stays byte-for-byte compatible with the v1.5.4 call shape.
                 job["mastering_profile"] = await asyncio.to_thread(master_professional_voice, output_path)
             job["quality_summary"] = summarize_quality(quality_reports, quality_retries)
+            if fast_professional_qc and bool(options.get("quality_gate", True)):
+                job["stage"] = "Running one fast final quality check"
+                self._persist(force=True)
+                final_verification = await asyncio.to_thread(
+                    self.quality.evaluate_final_file,
+                    output_path,
+                    job.get("generation_text") or job.get("text") or "",
+                    voice_path,
+                    bool(options.get("speaker_consistency", True)),
+                )
+                final_summary = final_verification.get("summary") or {}
+                combined = dict(job["quality_summary"] or {})
+                combined.update({
+                    "average_score": final_summary.get("average_score", combined.get("average_score")),
+                    "average_wer": final_summary.get("average_wer"),
+                    "minimum_speaker_similarity": final_summary.get("minimum_speaker_similarity"),
+                    "asr_verified": bool(final_summary.get("asr_verified", False)),
+                    "speaker_verified": bool(final_summary.get("speaker_verified", False)),
+                    "mode": final_summary.get("mode", "fast-final-pass"),
+                })
+                combined["warnings"] = list(combined.get("warnings") or []) + list(final_summary.get("warnings") or [])
+                job["quality_summary"] = combined
+                caption_asr_words = list(final_verification.get("words") or [])
+                caption_asr_complete = bool(caption_asr_words)
+
             if model_name == "chatterbox-turbo":
                 job["stage"] = "Checking Turbo prosody and avatar engagement"
                 job["prosody_summary"] = await asyncio.to_thread(

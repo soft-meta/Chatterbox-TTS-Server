@@ -105,9 +105,9 @@ def test_backend_and_ui_use_hidden_auto_emotion_pipeline() -> None:
 
 
 def test_colab_requests_l4_and_final_version_is_current() -> None:
-    notebook_path = ROOT / "colab" / "SoftMeta_Chatterbox_TTS_Colab_v1.5.7.ipynb"
+    notebook_path = ROOT / "colab" / "SoftMeta_Chatterbox_TTS_Colab_v1.5.10.ipynb"
     notebook = json.loads(notebook_path.read_text(encoding="utf-8"))
     assert notebook["metadata"]["accelerator"] == "GPU"
     assert notebook["metadata"]["colab"]["gpuType"] == "L4"
     server_source = (ROOT / "server.py").read_text(encoding="utf-8")
-    assert 'APP_VERSION = "1.5.7"' in server_source
+    assert 'APP_VERSION = "1.5.10"' in server_source

@@ -1,20 +1,32 @@
 # SoftMeta Chatterbox TTS Server
 
-## v1.5.7 Single Professional Generate Audio
+## v1.5.10 Short-Tail QC Safety
 
-Chatterbox Turbo remains the production default. The former Standard-vs-Advanced A/B experiment is complete: the professional pipeline is now the single **Generate Audio** workflow. Chatterbox Original remains selectable and its existing behavior is intentionally frozen for now.
+Chatterbox Turbo remains the production default. The single **Generate Audio** workflow keeps the professional speech pipeline from v1.5.8, including pronunciation preparation, Senior Clear Speech, optional native Auto Emotion, natural pause shaping, age-aware pacing, dynamics-preserving mastering, Prosody reporting, reliable downloads, 48 kHz video master and SRT/VTT captions.
 
-### Generate Audio
+### Faster professional generation
 
-Generate Audio includes the professional long-form pipeline: pronunciation preparation, Senior Clear Speech, semantic/chunk planning, natural micro-pauses, senior pace profiles, Production QC, speaker consistency advisory, dynamics-preserving mastering, Prosody reporting, 48 kHz video master and SRT/VTT captions.
+The expensive Production QC architecture has been redesigned for Turbo long-form generation. Every generated chunk still receives an objective acoustic safety check, but Whisper ASR and SpeechBrain speaker verification no longer run between every TTS model call. The complete mastered narration receives one final ASR verification and one representative speaker-consistency check instead.
+
+When faster-whisper supports its batched pipeline, final ASR uses a single batched pass with beam size 1 and word timestamps. If batched inference is unavailable, the server falls back to one ordinary final-file transcription rather than returning to per-chunk ASR.
+
+Soft ASR disagreements no longer cause repeated Turbo re-generation. An objectively broken chunk may receive one focused retry; the existing smaller-chunk rescue remains available only for a genuine hard acoustic failure.
+
+Turbo-native event sentences are now packed with nearby narration instead of forcing one tiny model call for every `[chuckle]`, `[laugh]`, `[sigh]`, or `[gasp]`. Event-bearing spans remain moderately local while reducing long-form model-call overhead.
+
+
+### Short-tail false-failure fix
+
+Fast Professional QC no longer treats speaking rate by itself as proof of corrupt audio. Short final chunks and Turbo event spans can legitimately contain longer pauses or non-verbal events, making words-per-minute unreliable. Only objective waveform failures such as empty audio, invalid samples, unusable level or mostly-silent audio can hard-stop a Turbo job. Speaking-rate outliers remain advisory, and short spans are exempt from normal rate-drift retries unless timing is truly absurd.
 
 ### Optional Auto Emotion
 
-Auto Emotion is **OFF by default**. When enabled, the server reads the full Turbo script and may insert only four audible native-event controls when the wording genuinely supports them: `[chuckle]`, `[laugh]`, `[sigh]`, and `[gasp]`. A typical seven-minute script with enough real emotional moments can reach roughly twelve well-spaced events, with more attention in the first five-minute avatar section and a calmer B-roll tail. Neutral instructional text receives no fabricated event just to hit a count.
+Auto Emotion is **OFF by default**. When enabled, only four audible Turbo-native events are inserted when the wording genuinely supports them: `[chuckle]`, `[laugh]`, `[sigh]`, and `[gasp]`. Neutral text receives no fabricated event.
 
-Manual Turbo event insertion in the UI is limited to the same four controls. Event brackets are protected through pronunciation and clear-speech normalization so the token reaches Turbo intact.
+### Queue and downloads
 
-### Queue workflow
+Finished Queue Monitor cards can be dismissed without deleting their generated audio. The minimized progress card remains draggable and shows live completion progress. Final WAVs, cuts and platform assets use server-enforced attachment downloads for reliable delivery through the Colab proxy.
 
-Each finished Queue Monitor card has an × control that dismisses only that history card while preserving the generated audio and Audio workspace. The minimized queue card now shows a live percentage bar and can be dragged to a convenient screen position; its position is remembered in the browser.
+### Original model
 
+Chatterbox Original remains selectable and keeps its previous generation/QC behavior. The v1.5.10 fast final-pass architecture is enabled only for the advanced Chatterbox Turbo workflow.

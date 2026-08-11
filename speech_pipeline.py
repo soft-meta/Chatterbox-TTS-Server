@@ -204,6 +204,72 @@ def emotion_tag_for_text(text: str) -> str | None:
     return match.group(1).lower() if match else None
 
 
+def turbo_event_tag_for_text(text: str) -> str | None:
+    """Return the first Turbo-native event anywhere in a packed speech span."""
+    match = _TURBO_TAG.search(text or "")
+    return match.group(0)[1:-1].lower() if match else None
+
+
+def _turbo_native_event_chunks(text: str, max_words: int) -> list[tuple[str, str | None]]:
+    """Pack Turbo-native events efficiently instead of isolating every tagged sentence.
+
+    Turbo's event tokens are part of its tokenizer and can occur inside a normal text
+    span. Earlier SoftMeta builds forced every event sentence into a tiny model call,
+    which multiplied long-form inference overhead. Keep event-bearing spans moderately
+    local (about 60 spoken words) while still packing surrounding narration.
+    """
+    cleaned = re.sub(r"[ \t]+", " ", text.strip())
+    if not cleaned:
+        return []
+    sentences = [part.strip() for part in _SENTENCE.split(cleaned) if part.strip()]
+    if not sentences:
+        return [(cleaned, turbo_event_tag_for_text(cleaned))]
+
+    packed: list[tuple[str, str | None]] = []
+    current: list[str] = []
+    current_words = 0
+    current_has_event = False
+    event_limit = max(42, min(max_words, 62))
+
+    def flush() -> None:
+        nonlocal current, current_words, current_has_event
+        if not current:
+            return
+        value = " ".join(current).strip()
+        if value:
+            packed.append((value, turbo_event_tag_for_text(value)))
+        current = []
+        current_words = 0
+        current_has_event = False
+
+    for sentence in sentences:
+        sentence_words = count_words(_TURBO_TAG.sub("", sentence))
+        sentence_has_event = turbo_event_tag_for_text(sentence) is not None
+        if sentence_words > max_words:
+            flush()
+            for piece in split_text(sentence, max_words, prefer_clauses=True):
+                packed.append((piece, turbo_event_tag_for_text(piece)))
+            continue
+
+        proposed_has_event = current_has_event or sentence_has_event
+        limit = event_limit if proposed_has_event else max_words
+        if current and current_words + sentence_words > limit:
+            flush()
+            proposed_has_event = sentence_has_event
+            limit = event_limit if proposed_has_event else max_words
+
+        current.append(sentence)
+        current_words += sentence_words
+        current_has_event = proposed_has_event
+
+        # Do not let an event-bearing call grow past the compact Turbo event window.
+        if current_has_event and current_words >= event_limit:
+            flush()
+
+    flush()
+    return packed
+
+
 def _emotion_aware_chunks(text: str, max_words: int) -> list[tuple[str, str | None]]:
     """Pack neutral narration normally while isolating tagged emotion sentences.
 
@@ -352,7 +418,11 @@ def build_long_form_segments(
         # Keep the first generated pass around 25-30 seconds at the intended intro
         # pace. Later chunks use the user's long-form chunk size.
         first_limit = min(max_words, 72) if not segments else max_words
-        raw_chunks = _emotion_aware_chunks(block_text, first_limit)
+        raw_chunks = (
+            _turbo_native_event_chunks(block_text, first_limit)
+            if turbo_avatar_mode
+            else _emotion_aware_chunks(block_text, first_limit)
+        )
         if not raw_chunks:
             continue
         for chunk_index, (chunk, emotion_tag) in enumerate(raw_chunks):

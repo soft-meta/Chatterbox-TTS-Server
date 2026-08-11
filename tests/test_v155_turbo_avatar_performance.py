@@ -107,8 +107,8 @@ def test_v155_is_turbo_first_in_server_ui_and_colab() -> None:
     assert DEFAULT_CONFIG["tts_engine"]["default_model"] == "chatterbox-turbo"
     app = (ROOT / "ui" / "app.js").read_text(encoding="utf-8")
     server = (ROOT / "server.py").read_text(encoding="utf-8")
-    notebook = (ROOT / "colab" / "SoftMeta_Chatterbox_TTS_Colab_v1.5.7.ipynb").read_text(encoding="utf-8")
+    notebook = (ROOT / "colab" / "SoftMeta_Chatterbox_TTS_Colab_v1.5.10.ipynb").read_text(encoding="utf-8")
     assert "model === 'chatterbox-turbo'" in app
     assert "analyze_turbo_avatar_performance" in server
-    assert 'APP_VERSION = "1.5.7"' in server
+    assert 'APP_VERSION = "1.5.10"' in server
     assert '\\"SOFTMETA_MODEL\\": \\"chatterbox-turbo\\"' in notebook

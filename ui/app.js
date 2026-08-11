@@ -82,6 +82,20 @@
     return contentType.includes('application/json') ? response.json() : response;
   }
 
+  function triggerAttachmentDownload(url, filename = '') {
+    // The server endpoint sends Content-Disposition: attachment. Keeping this as a
+    // normal same-origin navigation also works reliably through Colab's proxy, where
+    // the HTML download attribute alone may be ignored.
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    if (filename) anchor.download = filename;
+    anchor.rel = 'noopener';
+    anchor.style.display = 'none';
+    document.body.append(anchor);
+    anchor.click();
+    window.setTimeout(() => anchor.remove(), 1000);
+  }
+
   function toast(message, type = '') {
     const item = document.createElement('div');
     item.className = `toast ${type}`;
@@ -1070,7 +1084,7 @@
         const download = document.createElement('a');
         download.className = 'button button-secondary';
         download.textContent = 'Download WAV';
-        download.href = `/api/jobs/${job.id}/audio?download=true`;
+        download.href = `/api/jobs/${job.id}/download`;
         download.download = '';
         actions.append(download);
       } else if (!['failed', 'cancelled', 'interrupted'].includes(job.status)) {
@@ -1295,7 +1309,7 @@
     player.src = audioUrl;
     wirePlayback(tab);
     const download = panel.querySelector('[data-role="download-original"]');
-    download.href = `${audioUrl}?download=true`;
+    download.href = `/api/jobs/${job.id}/download`;
     download.download = '';
     const assets = [
       ['download-video-master', job.video_master_filename, `/api/jobs/${job.id}/asset/video-master`],
@@ -1612,13 +1626,9 @@
           filename_prefix: prefix,
         }),
       });
-      const anchor = document.createElement('a');
-      anchor.href = data.url;
-      anchor.download = data.filename;
-      document.body.append(anchor);
-      anchor.click();
-      anchor.remove();
-      toast(`${data.filename} is ready.`, 'success');
+      if (!data.download_url) throw new Error('The server did not return a download URL.');
+      triggerAttachmentDownload(data.download_url, data.filename);
+      toast(`${data.filename} download started.`, 'success');
     } catch (error) {
       toast(error.message, 'error');
     }
