@@ -1,38 +1,26 @@
 # SoftMeta Chatterbox TTS Server
 
-## v1.6.0 Fresh Turbo Reset
+## v1.6.1 Turbo Motivational Controls
 
-v1.6.0 removes the experimental professional narration stack and restores a direct Chatterbox Turbo workflow for long-form voice generation.
+v1.6.1 keeps the clean Chatterbox Turbo generation architecture from v1.6.0 and restores the creator controls requested from v1.2.1. No Auto Emotion, ASR/QC, speaker verification, retry/rescue, pronunciation rewrite, prosody stack, EQ/compression or advanced mastering has been reintroduced.
 
-### Generate Audio
+### Presets
 
-Every Generate Audio job uses Chatterbox Turbo with the Turbo sampling defaults used by the upstream demo:
+- **Motivational Speech** is the default for calm senior-advisor, tutorial, health and life-advice narration. It restores the v1.2.1 Turbo profile: Temperature 0.72, Top P 0.90, Top K 1000, Repetition Penalty 1.20, Speed Factor 0.93 and a 140 ms chunk breath.
+- **Chatterbox Turbo Default** restores the official-style Turbo sampling baseline: Temperature 0.8, Top P 0.95, Top K 1000, Repetition Penalty 1.20, Speed Factor 1.0 and an 80 ms chunk breath.
 
-- temperature `0.8`
-- top-p `0.95`
-- top-k `1000`
-- repetition penalty `1.2`
-- min-p `0.0`
-- random seed per job/chunk
+The preset fills the controls first; manual changes are honored by the backend.
 
-The server does not run Auto Emotion, pronunciation rewriting, Senior Clear Speech, age pacing, tempo changes, Production QC, Whisper ASR, speaker verification, retry/rescue generation, Prosody processing, EQ, compression, de-essing, caption generation or video-master generation.
+### Turbo controls
 
-### Long scripts
+Working controls: Temperature, Top P, Top K, Repetition Penalty, Speed Factor and Seed. Speed Factor is applied once with FFmpeg `atempo`, preserving pitch. Exaggeration and CFG Weight remain visible as Original-only references and are disabled because Turbo ignores them.
 
-Turbo is a short-input model, so long scripts are divided only at sentence-safe boundaries into calls of at most 300 characters. A text-integrity check runs before inference. If the splitter ever changes the lexical script content, the job stops before spending GPU time.
+Turbo is English-only in this build. Voice identity, maturity and accent are inherited primarily from the reference clip, so use a clean American-English reference recording when an American accent is desired.
 
-Each safe chunk is sent to Turbo exactly once. There is no quality-warning retry loop.
+### Long-form reliability
 
-### Output volume
+Long scripts are split into sentence-safe chunks capped near 300 characters. Each chunk is generated exactly once. The only final audio processing is the optional Speed Factor pass plus the existing loudness-only normalization requested by the user.
 
-The only final post-processing is a two-pass linear FFmpeg loudness normalization targeting approximately `-12.5 LUFS` with a `-0.8 dB` true-peak ceiling. This keeps the stronger output level from recent builds without applying the former professional processing chain.
+### Colab
 
-### Colab runtime
-
-The v1.6.0 Colab notebook starts the server under a keep-alive supervisor. While the Colab runtime is alive, an unexpected child-server exit is restarted automatically. The Audio Studio also exposes a manual **Disconnect Colab** control when running inside Colab. After disconnecting the runtime, reconnect from the Colab page.
-
-Google Colab can still end a runtime because of its own session or resource policies; the server does not contain any job-completion auto-disconnect behavior.
-
-### Preserved workflow
-
-Voice cloning/predefined voices, Audio 1–5 queueing, Queue Monitor, waveform preview/cutting, reliable attachment downloads, draggable minimized progress, Remove All and individual Queue Monitor history dismissal remain available.
+The v1.6.1 Colab notebook keeps the server alive under the existing supervisor and retains the manual Disconnect Colab control.

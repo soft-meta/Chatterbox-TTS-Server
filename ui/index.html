@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f7f9fc">
   <title>SoftMeta Chatterbox TTS Server</title>
-  <link rel="stylesheet" href="/static/styles.css?v=1.6.0">
+  <link rel="stylesheet" href="/static/styles.css?v=1.6.1">
 </head>
 <body>
   <header class="app-header">
@@ -39,7 +39,7 @@
         <div class="studio-heading-copy">
           <span class="section-eyebrow">Speech workspace</span>
           <h2>Generate Speech</h2>
-          <p>Fresh Chatterbox Turbo generation with voice cloning and up to five queued audio jobs.</p>
+          <p>Chatterbox Turbo generation with voice cloning, a senior-friendly Motivational Speech preset, creator controls and up to five queued audio jobs.</p>
         </div>
         <div class="studio-actions">
           <button id="generate-all" class="button button-primary" type="button">Generate All</button>
@@ -65,7 +65,7 @@
     <section id="tips-card" class="tips-card">
       <h2>Tips &amp; Tricks</h2>
       <ul>
-        <li>Generation uses fresh Chatterbox Turbo defaults. Long scripts are automatically split into model-safe sentence chunks.</li>
+        <li>Generation stays on the clean Turbo path. Motivational Speech adds only supported sampling controls plus optional pitch-preserving Speed Factor; long scripts still use model-safe sentence chunks.</li>
         <li>Use a clean 10–20 second single-speaker reference for voice cloning.</li>
         <li>The only post-processing is a final loudness boost so the downloaded WAV stays easy to hear.</li>
       </ul>
@@ -73,7 +73,7 @@
   </main>
 
   <footer class="app-footer">
-    <span><a href="https://github.com/soft-meta/chatterbox-v2" target="_blank" rel="noopener">SoftMeta Chatterbox TTS</a> Server v1.6.0</span>
+    <span><a href="https://github.com/soft-meta/chatterbox-v2" target="_blank" rel="noopener">SoftMeta Chatterbox TTS</a> Server v1.6.1</span>
     <span>Powered by the official open-source Chatterbox engine</span>
   </footer>
 
@@ -183,64 +183,60 @@
 
       </section>
 
-      <section class="preset-section hidden" style="display:none">
+      <section class="preset-section">
         <div class="section-label">Load Example Preset</div>
         <div data-role="preset-buttons" class="preset-buttons"></div>
         <select data-field="preset" class="visually-hidden" aria-label="Generation preset"></select>
       </section>
 
-      <details class="parameters-panel hidden" style="display:none">
+      <details class="parameters-panel" open>
         <summary>Generation Parameters</summary>
+        <p class="voice-help">Motivational Speech is tuned for calm senior-advisor, tutorial, health and life-advice narration. Turbo follows the cloned reference voice for identity, maturity and accent, so use a clean American-English reference when you want an American accent.</p>
         <div class="parameter-grid">
           <label class="slider-field">
             <span><b>Temperature</b><output data-output="temperature"></output></span>
             <input data-field="temperature" type="range" min="0.05" max="2" step="0.05">
           </label>
           <label class="slider-field">
-            <span><b>Exaggeration</b><output data-output="exaggeration"></output></span>
-            <input data-field="exaggeration" type="range" min="0" max="2" step="0.05">
+            <span><b>Top P</b><output data-output="top_p"></output></span>
+            <input data-field="top_p" type="range" min="0.10" max="1" step="0.05">
           </label>
           <label class="slider-field">
-            <span><b>CFG Weight</b><output data-output="cfg_weight"></output></span>
-            <input data-field="cfg_weight" type="range" min="0" max="1" step="0.05">
+            <span><b>Repetition Penalty</b><output data-output="repetition_penalty"></output></span>
+            <input data-field="repetition_penalty" type="range" min="1" max="2" step="0.05">
           </label>
           <label class="slider-field">
             <span><b>Speed Factor</b><output data-output="speed_factor"></output></span>
-            <input data-field="speed_factor" type="range" min="0.5" max="2" step="0.05">
+            <input data-field="speed_factor" type="range" min="0.80" max="1.20" step="0.01">
+          </label>
+          <label class="slider-field turbo-original-only" title="Original-only control. Chatterbox Turbo ignores Exaggeration.">
+            <span><b>Exaggeration</b> <small>Original-only</small><output data-output="exaggeration"></output></span>
+            <input data-field="exaggeration" type="range" min="0" max="2" step="0.05" value="0" disabled>
+          </label>
+          <label class="slider-field turbo-original-only" title="Original-only control. Chatterbox Turbo ignores CFG Weight.">
+            <span><b>CFG Weight</b> <small>Original-only</small><output data-output="cfg_weight"></output></span>
+            <input data-field="cfg_weight" type="range" min="0" max="1" step="0.05" value="0" disabled>
           </label>
         </div>
         <div class="parameter-bottom-grid">
           <label class="field">
-            <span>Generation Seed</span>
-            <input data-field="seed" type="number" min="0" max="2147483647">
+            <span>Top K</span>
+            <input data-field="top_k" type="number" min="1" max="5000" step="1">
           </label>
           <label class="field">
-            <span>Senior Listener Pace</span>
-            <select data-field="senior_pace_profile">
-              <option value="60s">60s audience</option>
-              <option value="70s">70s audience</option>
-              <option value="80s">80s audience</option>
-              <option value="90plus">90+ audience</option>
-            </select>
+            <span>Generation Seed</span>
+            <input data-field="seed" type="number" min="0" max="2147483647">
+            <small>0 = random</small>
           </label>
           <label class="field">
             <span>Language</span>
-            <select data-field="language">
-              <option value="en">US English</option>
-              <option value="es">Spanish</option>
-              <option value="fr">French</option>
-              <option value="de">German</option>
-              <option value="it">Italian</option>
-              <option value="pt">Portuguese</option>
-              <option value="hi">Hindi</option>
-              <option value="ja">Japanese</option>
-              <option value="ko">Korean</option>
-              <option value="zh">Chinese</option>
+            <select data-field="language" disabled>
+              <option value="en">US English / English Turbo</option>
             </select>
           </label>
           <label class="field">
             <span>Output Format</span>
-            <select data-field="output_format">
+            <select data-field="output_format" disabled>
               <option value="wav">WAV</option>
             </select>
           </label>
@@ -330,6 +326,6 @@
 
 
 
-  <script src="/static/app.js?v=1.6.0" defer></script>
+  <script src="/static/app.js?v=1.6.1" defer></script>
 </body>
 </html>

@@ -33,7 +33,7 @@ from storage import AUDIO_EXTENSIONS, Storage
 from utils import safe_filename
 
 APP_NAME = "SoftMeta Chatterbox TTS Server"
-APP_VERSION = "1.6.0"
+APP_VERSION = "1.6.1"
 logger = logging.getLogger("softmeta.chatterbox")
 
 config = load_config()
@@ -47,14 +47,36 @@ MODELS = [
         "id": "chatterbox-turbo",
         "name": "Chatterbox Turbo (English)",
         "badge": "Turbo",
-        "description": "Fresh Chatterbox Turbo defaults with long-text safe splitting and loudness-only final output.",
+        "description": "Chatterbox Turbo with creator controls, a senior-friendly Motivational Speech preset, safe long-text splitting and loudness-only final output.",
     },
 ]
 
 PRESETS = [
     {
+        "name": "Motivational Speech",
+        "description": "Calm senior-advisor, tutorial, health and life-advice delivery restored from v1.2.1. Uses only supported Turbo sampling controls plus a light pitch-preserving pace adjustment.",
+        "language": "en",
+        "temperature": 0.72,
+        "exaggeration": 0.0,
+        "cfg_weight": 0.0,
+        "repetition_penalty": 1.2,
+        "min_p": 0.0,
+        "top_p": 0.90,
+        "top_k": 1000,
+        "speed_factor": 0.93,
+        "inter_chunk_pause_ms": 140,
+        "seed": 0,
+        "split_text": True,
+        "chunk_words": 50,
+        "output_format": "wav",
+        "senior_pace_profile": "70s",
+        "quality_gate": False,
+        "speaker_consistency": False,
+        "platform_assets": False,
+    },
+    {
         "name": "Chatterbox Turbo Default",
-        "description": "Official Turbo sampling defaults. No emotion, QC, pacing, retries, pronunciation rewrite or professional processing.",
+        "description": "Official-style Turbo sampling defaults with the same safe long-text splitting and loudness-only final volume.",
         "language": "en",
         "temperature": 0.8,
         "exaggeration": 0.0,
@@ -64,6 +86,7 @@ PRESETS = [
         "top_p": 0.95,
         "top_k": 1000,
         "speed_factor": 1.0,
+        "inter_chunk_pause_ms": 80,
         "seed": 0,
         "split_text": True,
         "chunk_words": 50,

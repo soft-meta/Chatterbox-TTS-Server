@@ -35,7 +35,7 @@ class GenerationOptions(BaseModel):
 
 
 class AudioJobCreate(BaseModel):
-    preset: str | None = None
+    preset: str | None = "Motivational Speech"
     generation_mode: Literal["standard", "advanced"] = "standard"
     auto_emotion: bool = False
     audio_number: int = Field(1, ge=1, le=5)

@@ -2,7 +2,7 @@
   'use strict';
 
   const MAX_TABS = 5;
-  const STORAGE_KEY = 'softMetaChatterboxTabsV11';
+  const STORAGE_KEY = 'softMetaChatterboxTabsV12';
   const FLOATING_POSITION_KEY = 'softMetaChatterboxFloatingProgressV1';
   const THEME_KEY = 'softMetaChatterboxTheme';
   const $ = (selector, root = document) => root.querySelector(selector);
@@ -35,21 +35,22 @@
       emotion_summary: null,
       advanced_tagged_text: '',
       auto_emotion: false,
-      preset: defaults.preset || 'Chatterbox Turbo Default',
+      preset: defaults.preset || 'Motivational Speech',
       language: defaults.language || 'en',
       voice_mode: 'clone',
       voice_filename: '',
-      temperature: defaults.temperature ?? 0.8,
+      temperature: defaults.temperature ?? 0.72,
       exaggeration: 0.0,
       cfg_weight: 0.0,
       repetition_penalty: defaults.repetition_penalty ?? 1.2,
       min_p: 0.0,
-      top_p: 0.95,
+      top_p: defaults.top_p ?? 0.90,
       top_k: defaults.top_k ?? 1000,
-      speed_factor: defaults.speed_factor ?? 1.0,
-      seed: 0,
+      speed_factor: defaults.speed_factor ?? 0.93,
+      inter_chunk_pause_ms: defaults.inter_chunk_pause_ms ?? 140,
+      seed: defaults.seed ?? 0,
       split_text: defaults.split_text ?? true,
-      chunk_words: 50,
+      chunk_words: defaults.chunk_words ?? 50,
       output_format: defaults.output_format || 'wav',
       senior_pace_profile: defaults.senior_pace_profile || '70s',
       quality_gate: false,
@@ -353,7 +354,7 @@
   function fillPanel(tab) {
     const panel = tab.panel;
     const stringFields = ['title', 'text', 'preset', 'language', 'voice_filename', 'output_format', 'senior_pace_profile', 'cut_start', 'cut_end'];
-    const numberFields = ['temperature', 'exaggeration', 'cfg_weight', 'speed_factor', 'seed', 'chunk_words'];
+    const numberFields = ['temperature', 'exaggeration', 'cfg_weight', 'repetition_penalty', 'top_p', 'top_k', 'speed_factor', 'seed', 'chunk_words'];
     stringFields.forEach(name => {
       const element = field(panel, name);
       if (element && tab[name] !== undefined) element.value = tab[name];
@@ -366,7 +367,7 @@
     panel.querySelector('[data-role="word-count"]').textContent = `${countWords(tab.text)} words`;
     panel.querySelector('[data-role="chunk-value"]').textContent = tab.chunk_words;
     panel.querySelector('.audio-number-chip').textContent = `Audio ${tab.number}`;
-    ['temperature', 'exaggeration', 'cfg_weight', 'speed_factor'].forEach(name => updateSliderOutput(panel, name));
+    ['temperature', 'exaggeration', 'cfg_weight', 'repetition_penalty', 'top_p', 'speed_factor'].forEach(name => updateSliderOutput(panel, name));
     updateVoiceControls(tab);
     updatePresetChips(tab);
     renderEmotionStatus(tab);
@@ -382,7 +383,7 @@
       const element = field(panel, name);
       if (element) tab[name] = element.value;
     });
-    ['temperature', 'exaggeration', 'cfg_weight', 'speed_factor', 'seed', 'chunk_words'].forEach(name => {
+    ['temperature', 'exaggeration', 'cfg_weight', 'repetition_penalty', 'top_p', 'top_k', 'speed_factor', 'seed', 'chunk_words'].forEach(name => {
       const element = field(panel, name);
       if (element) tab[name] = Number(element.value);
     });
@@ -432,7 +433,6 @@
     }
     fillPanel(tab);
     saveTabs();
-    scheduleEmotionAnalysis(tab, { immediate: true });
     toast(`${name} preset applied.`, 'success');
   }
 
@@ -574,7 +574,7 @@
       if (event.target.matches('[data-field="chunk_words"]')) {
         panel.querySelector('[data-role="chunk-value"]').textContent = event.target.value;
       }
-      if (event.target.matches('[data-field="temperature"], [data-field="exaggeration"], [data-field="cfg_weight"], [data-field="speed_factor"]')) {
+      if (event.target.matches('[data-field="temperature"], [data-field="exaggeration"], [data-field="cfg_weight"], [data-field="repetition_penalty"], [data-field="top_p"], [data-field="speed_factor"]')) {
         updateSliderOutput(panel, event.target.dataset.field);
       }
       captureTab(tab);
@@ -623,19 +623,20 @@
     });
   }
 
-  function optionsFor() {
+  function optionsFor(tab) {
     return {
       model: 'chatterbox-turbo',
       language: 'en',
-      temperature: 0.8,
+      temperature: Number(tab.temperature),
       exaggeration: 0.0,
       cfg_weight: 0.0,
-      repetition_penalty: 1.2,
+      repetition_penalty: Number(tab.repetition_penalty),
       min_p: 0.0,
-      top_p: 0.95,
-      top_k: 1000,
-      speed_factor: 1.0,
-      seed: 0,
+      top_p: Number(tab.top_p),
+      top_k: Number(tab.top_k),
+      speed_factor: Number(tab.speed_factor),
+      inter_chunk_pause_ms: Number(tab.inter_chunk_pause_ms ?? 140),
+      seed: Number(tab.seed || 0),
       split_text: true,
       chunk_words: 50,
       output_format: 'wav',
@@ -649,7 +650,7 @@
   function jobPayload(tab) {
     captureTab(tab);
     return {
-      preset: 'Chatterbox Turbo Default',
+      preset: tab.preset || 'Motivational Speech',
       generation_mode: 'standard',
       auto_emotion: false,
       audio_number: tab.number,
@@ -657,7 +658,7 @@
       text: tab.text,
       voice_mode: tab.voice_mode,
       voice_filename: tab.voice_filename,
-      options: optionsFor(),
+      options: optionsFor(tab),
     };
   }
 

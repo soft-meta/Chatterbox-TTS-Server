@@ -53,6 +53,25 @@ OFFICIAL_TURBO_PROFILE: dict[str, Any] = {
     "platform_assets": False,
 }
 
+# Restored from the user's v1.2.1 Turbo preset. These are intentionally light-touch
+# controls only: supported Turbo sampling values, a single pitch-preserving final
+# tempo pass, and a small inter-chunk breath. No QC, ASR, emotion, pronunciation,
+# prosody, retry/rescue or professional mastering stack is reintroduced.
+MOTIVATIONAL_TURBO_PROFILE: dict[str, Any] = {
+    **OFFICIAL_TURBO_PROFILE,
+    "temperature": 0.72,
+    "repetition_penalty": 1.2,
+    "top_p": 0.90,
+    "top_k": 1000,
+    "speed_factor": 0.93,
+    "inter_chunk_pause_ms": 140,
+}
+
+_TURBO_USER_CONTROLS = {
+    "temperature", "repetition_penalty", "top_p", "top_k",
+    "speed_factor", "seed", "inter_chunk_pause_ms",
+}
+
 # Keep the user's current louder delivery while making the processing transparent:
 # two-pass EBU loudness normalisation only, with no EQ/compression/tempo/prosody work.
 FINAL_TARGET_LUFS = -12.5
@@ -151,7 +170,7 @@ def split_turbo_long_text(text: str, max_chars: int = TURBO_MAX_CHARS) -> list[s
 class QueueManager:
     """Simple single-GPU Chatterbox Turbo queue.
 
-    v1.6.0 intentionally restores the fast, direct Turbo generation architecture.
+    v1.6.1 keeps the fast, direct Turbo generation architecture.
     The only output processing after model generation is final loudness normalisation.
     """
 
@@ -225,11 +244,58 @@ class QueueManager:
 
     @staticmethod
     def _effective_options(request: AudioJobCreate) -> dict[str, Any]:
-        # Ignore legacy/local-storage tuning values. Every Generate Audio request is
-        # deliberately restored to the official Turbo defaults.
-        options = dict(OFFICIAL_TURBO_PROFILE)
-        options["seed"] = secrets.randbelow(2_147_483_646) + 1
+        # Start from the selected safe Turbo preset, then honor only controls that
+        # Chatterbox Turbo actually uses (plus our one final tempo control).
+        # Original-only CFG/exaggeration/min_p stay neutral so the UI never pretends
+        # they affect Turbo. Heavy professional/QC features remain hard-disabled.
+        base = (
+            MOTIVATIONAL_TURBO_PROFILE
+            if request.preset == "Motivational Speech"
+            else OFFICIAL_TURBO_PROFILE
+        )
+        options = dict(base)
+        supplied = request.options.model_dump()
+        explicit = set(request.options.model_fields_set)
+        for key in _TURBO_USER_CONTROLS:
+            if key in explicit:
+                options[key] = supplied[key]
+
+        options.update({
+            "model": "chatterbox-turbo",
+            "language": "en",
+            "exaggeration": 0.0,
+            "cfg_weight": 0.0,
+            "min_p": 0.0,
+            "split_text": True,
+            "output_format": "wav",
+            "quality_gate": False,
+            "speaker_consistency": False,
+            "platform_assets": False,
+        })
+        if int(options.get("seed", 0)) <= 0:
+            options["seed"] = secrets.randbelow(2_147_483_646) + 1
         return options
+
+    @staticmethod
+    def _apply_final_tempo(output_path: Path, speed_factor: float) -> None:
+        """Apply one pitch-preserving tempo pass when the creator changes Speed Factor."""
+        if abs(speed_factor - 1.0) <= 0.001:
+            return
+        temp_path = output_path.with_name(output_path.stem + ".tempo.wav")
+        temp_path.unlink(missing_ok=True)
+        try:
+            subprocess.run(
+                [
+                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                    "-i", str(output_path), "-filter:a", f"atempo={speed_factor:.6f}",
+                    "-c:a", "pcm_s16le", str(temp_path),
+                ],
+                check=True,
+            )
+            temp_path.replace(output_path)
+        except (FileNotFoundError, subprocess.CalledProcessError) as error:
+            temp_path.unlink(missing_ok=True)
+            raise RuntimeError("Speed Factor requires a working FFmpeg atempo filter.") from error
 
     async def create(self, request: AudioJobCreate, enqueue: bool = True) -> dict[str, Any]:
         total_words = count_words(request.text)
@@ -240,7 +306,7 @@ class QueueManager:
         options = self._effective_options(request)
         job = {
             "id": job_id,
-            "preset": "Chatterbox Turbo Default",
+            "preset": request.preset or "Motivational Speech",
             "generation_mode": "standard",
             "auto_emotion": False,
             "monitor_dismissed": False,
@@ -258,7 +324,9 @@ class QueueManager:
             "percent": 0.0,
             "remaining_percent": 100.0,
             "eta_seconds": None,
-            "estimated_audio_seconds": round(estimated_audio_seconds(total_words, 1.0), 1),
+            "estimated_audio_seconds": round(
+                estimated_audio_seconds(total_words, float(options.get("speed_factor", 1.0))), 1
+            ),
             "actual_audio_seconds": None,
             "output_filename": None,
             "video_master_filename": None,
@@ -522,7 +590,8 @@ class QueueManager:
 
                 output_file.write(audio)
                 if index < len(chunks):
-                    pause = int(result.sample_rate * TURBO_INTER_CHUNK_PAUSE_MS / 1000.0)
+                    pause_ms = max(0, int(options.get("inter_chunk_pause_ms", TURBO_INTER_CHUNK_PAUSE_MS)))
+                    pause = int(result.sample_rate * pause_ms / 1000.0)
                     output_file.write(np.zeros(pause, dtype=np.float32))
 
                 completed_words += chunk_words
@@ -551,6 +620,15 @@ class QueueManager:
             self._signal(job["id"])
             return
 
+        speed_factor = float(options.get("speed_factor", 1.0))
+        if abs(speed_factor - 1.0) > 0.001:
+            job["stage"] = "Applying natural pacing"
+            job["percent"] = 99.0
+            job["remaining_percent"] = 1.0
+            self._persist(force=True)
+            await asyncio.to_thread(self._apply_final_tempo, output_path, speed_factor)
+
+        # Keep the user's requested louder final level after the optional tempo pass.
         job["mastering_profile"] = await asyncio.to_thread(self._normalise_loudness, output_path)
         info = sf.info(output_path)
         job["status"] = "completed"
