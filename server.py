@@ -33,7 +33,7 @@ from storage import AUDIO_EXTENSIONS, Storage
 from utils import safe_filename
 
 APP_NAME = "SoftMeta Chatterbox TTS Server"
-APP_VERSION = "1.6.1"
+APP_VERSION = "1.6.2"
 logger = logging.getLogger("softmeta.chatterbox")
 
 config = load_config()
@@ -47,17 +47,17 @@ MODELS = [
         "id": "chatterbox-turbo",
         "name": "Chatterbox Turbo (English)",
         "badge": "Turbo",
-        "description": "Chatterbox Turbo with creator controls, a senior-friendly Motivational Speech preset, safe long-text splitting and loudness-only final output.",
+        "description": "",
     },
 ]
 
 PRESETS = [
     {
         "name": "Motivational Speech",
-        "description": "Calm senior-advisor, tutorial, health and life-advice delivery restored from v1.2.1. Uses only supported Turbo sampling controls plus a light pitch-preserving pace adjustment.",
+        "description": "",
         "language": "en",
         "temperature": 0.72,
-        "exaggeration": 0.0,
+        "exaggeration": 0.5,
         "cfg_weight": 0.0,
         "repetition_penalty": 1.2,
         "min_p": 0.0,
@@ -76,7 +76,7 @@ PRESETS = [
     },
     {
         "name": "Chatterbox Turbo Default",
-        "description": "Official-style Turbo sampling defaults with the same safe long-text splitting and loudness-only final volume.",
+        "description": "",
         "language": "en",
         "temperature": 0.8,
         "exaggeration": 0.0,

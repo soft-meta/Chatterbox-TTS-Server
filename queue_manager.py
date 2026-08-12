@@ -36,8 +36,8 @@ OFFICIAL_TURBO_PROFILE: dict[str, Any] = {
     "model": "chatterbox-turbo",
     "language": "en",
     "temperature": 0.8,
-    "exaggeration": 0.0,      # ignored by Turbo
-    "cfg_weight": 0.0,        # ignored by Turbo
+    "exaggeration": 0.0,
+    "cfg_weight": 0.0,
     "repetition_penalty": 1.2,
     "min_p": 0.0,
     "top_p": 0.95,
@@ -60,6 +60,8 @@ OFFICIAL_TURBO_PROFILE: dict[str, Any] = {
 MOTIVATIONAL_TURBO_PROFILE: dict[str, Any] = {
     **OFFICIAL_TURBO_PROFILE,
     "temperature": 0.72,
+    "exaggeration": 0.5,
+    "cfg_weight": 0.0,
     "repetition_penalty": 1.2,
     "top_p": 0.90,
     "top_k": 1000,
@@ -68,7 +70,7 @@ MOTIVATIONAL_TURBO_PROFILE: dict[str, Any] = {
 }
 
 _TURBO_USER_CONTROLS = {
-    "temperature", "repetition_penalty", "top_p", "top_k",
+    "temperature", "exaggeration", "cfg_weight", "repetition_penalty", "top_p", "top_k",
     "speed_factor", "seed", "inter_chunk_pause_ms",
 }
 
@@ -170,7 +172,7 @@ def split_turbo_long_text(text: str, max_chars: int = TURBO_MAX_CHARS) -> list[s
 class QueueManager:
     """Simple single-GPU Chatterbox Turbo queue.
 
-    v1.6.1 keeps the fast, direct Turbo generation architecture.
+    v1.6.2 keeps the fast, direct Turbo generation architecture.
     The only output processing after model generation is final loudness normalisation.
     """
 
@@ -244,10 +246,10 @@ class QueueManager:
 
     @staticmethod
     def _effective_options(request: AudioJobCreate) -> dict[str, Any]:
-        # Start from the selected safe Turbo preset, then honor only controls that
-        # Chatterbox Turbo actually uses (plus our one final tempo control).
-        # Original-only CFG/exaggeration/min_p stay neutral so the UI never pretends
-        # they affect Turbo. Heavy professional/QC features remain hard-disabled.
+        # Start from the selected Turbo preset, then honor creator controls.
+        # Exaggeration and CFG Weight are preserved as creator inputs. EngineService
+        # bridges them to Turbo-supported sampling controls while keeping the fresh
+        # generation architecture and all heavy QC/professional layers disabled.
         base = (
             MOTIVATIONAL_TURBO_PROFILE
             if request.preset == "Motivational Speech"
@@ -263,8 +265,6 @@ class QueueManager:
         options.update({
             "model": "chatterbox-turbo",
             "language": "en",
-            "exaggeration": 0.0,
-            "cfg_weight": 0.0,
             "min_p": 0.0,
             "split_text": True,
             "output_format": "wav",

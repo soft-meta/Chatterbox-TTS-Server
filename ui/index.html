@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f7f9fc">
   <title>SoftMeta Chatterbox TTS Server</title>
-  <link rel="stylesheet" href="/static/styles.css?v=1.6.1">
+  <link rel="stylesheet" href="/static/styles.css?v=1.6.2">
 </head>
 <body>
   <header class="app-header">
@@ -39,7 +39,6 @@
         <div class="studio-heading-copy">
           <span class="section-eyebrow">Speech workspace</span>
           <h2>Generate Speech</h2>
-          <p>Chatterbox Turbo generation with voice cloning, a senior-friendly Motivational Speech preset, creator controls and up to five queued audio jobs.</p>
         </div>
         <div class="studio-actions">
           <button id="generate-all" class="button button-primary" type="button">Generate All</button>
@@ -73,7 +72,7 @@
   </main>
 
   <footer class="app-footer">
-    <span><a href="https://github.com/soft-meta/chatterbox-v2" target="_blank" rel="noopener">SoftMeta Chatterbox TTS</a> Server v1.6.1</span>
+    <span><a href="https://github.com/soft-meta/chatterbox-v2" target="_blank" rel="noopener">SoftMeta Chatterbox TTS</a> Server v1.6.2</span>
     <span>Powered by the official open-source Chatterbox engine</span>
   </footer>
 
@@ -114,7 +113,7 @@
         <div class="label-row">
           <div>
             <label>Text to synthesise</label>
-            <p>Paste your script exactly as you want it spoken. No Auto Emotion, rewriting, QC retries, pacing or professional speech processing is applied.</p>
+            
           </div>
           <span data-role="word-count">0 words</span>
         </div>
@@ -176,7 +175,6 @@
             <button data-action="preview-voice" class="button button-secondary" type="button">Preview Voice</button>
           </div>
           <audio data-role="voice-player" class="voice-player hidden" controls preload="metadata"></audio>
-          <p class="voice-help">Use only voices you own or have permission to clone. Clean speech with no music or echo produces the best result.</p>
           <div data-role="voice-quality" class="voice-quality hidden" aria-live="polite"></div>
         </div>
 
@@ -191,7 +189,6 @@
 
       <details class="parameters-panel" open>
         <summary>Generation Parameters</summary>
-        <p class="voice-help">Motivational Speech is tuned for calm senior-advisor, tutorial, health and life-advice narration. Turbo follows the cloned reference voice for identity, maturity and accent, so use a clean American-English reference when you want an American accent.</p>
         <div class="parameter-grid">
           <label class="slider-field">
             <span><b>Temperature</b><output data-output="temperature"></output></span>
@@ -209,13 +206,13 @@
             <span><b>Speed Factor</b><output data-output="speed_factor"></output></span>
             <input data-field="speed_factor" type="range" min="0.80" max="1.20" step="0.01">
           </label>
-          <label class="slider-field turbo-original-only" title="Original-only control. Chatterbox Turbo ignores Exaggeration.">
-            <span><b>Exaggeration</b> <small>Original-only</small><output data-output="exaggeration"></output></span>
-            <input data-field="exaggeration" type="range" min="0" max="2" step="0.05" value="0" disabled>
+          <label class="slider-field">
+            <span><b>Exaggeration</b><output data-output="exaggeration"></output></span>
+            <input data-field="exaggeration" type="range" min="0" max="2" step="0.05">
           </label>
-          <label class="slider-field turbo-original-only" title="Original-only control. Chatterbox Turbo ignores CFG Weight.">
-            <span><b>CFG Weight</b> <small>Original-only</small><output data-output="cfg_weight"></output></span>
-            <input data-field="cfg_weight" type="range" min="0" max="1" step="0.05" value="0" disabled>
+          <label class="slider-field">
+            <span><b>CFG Weight</b><output data-output="cfg_weight"></output></span>
+            <input data-field="cfg_weight" type="range" min="0" max="1" step="0.05">
           </label>
         </div>
         <div class="parameter-bottom-grid">
@@ -326,6 +323,6 @@
 
 
 
-  <script src="/static/app.js?v=1.6.1" defer></script>
+  <script src="/static/app.js?v=1.6.2" defer></script>
 </body>
 </html>

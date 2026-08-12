@@ -31,7 +31,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "preset": "Motivational Speech",
         "language": "en",
         "temperature": 0.72,
-        "exaggeration": 0.0,
+        "exaggeration": 0.5,
         "cfg_weight": 0.0,
         "repetition_penalty": 1.2,
         "min_p": 0.0,
