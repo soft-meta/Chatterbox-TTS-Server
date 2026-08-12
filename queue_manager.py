@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import math
+import re
 import secrets
 import subprocess
 import time
@@ -16,129 +16,143 @@ import numpy as np
 import soundfile as sf
 
 from engine import EngineService
-from emotion_director import analyze_serious_senior_advisor, analyze_turbo_avatar_performance, contains_turbo_tag, is_heading, strip_turbo_tags, strip_abstract_turbo_tags
 from models import AudioJobCreate
 from storage import Storage
-from utils import (
-    count_words,
-    estimated_audio_seconds,
-    safe_filename,
-    split_text,
-)
-from speech_pipeline import build_long_form_segments, emotion_tag_for_text, prepare_senior_clear_speech_text
-from pronunciation_engine import prepare_pronunciation_text
-from quality_control import ChunkQualityReport, QualityController, summarize_quality
-from captions import aligned_expected_words, fallback_words, write_caption_files
-from reference_quality import analyze_reference_voice
-from professional_audio import (
-    adaptive_tempo_factor,
-    apply_tempo_array,
-    master_professional_voice,
-    shape_professional_pauses,
-    create_video_master_48k_stereo,
-    analyze_prosody_quality,
-)
-
-logger = logging.getLogger(__name__)
+from utils import count_words, estimated_audio_seconds, safe_filename
 
 TERMINAL_STATES = {"completed", "failed", "cancelled", "interrupted"}
 ACTIVE_STATES = {"queued", "running"}
 
+# Resemble AI's official Chatterbox Turbo Gradio demo labels its input as
+# "max chars 300".  Long creator scripts are therefore split only to make the
+# official short-input model usable for long-form work.  No text rewriting,
+# pronunciation layer, emotion layer, pacing layer, ASR, speaker-QC or rescue
+# regeneration is performed.
+TURBO_MAX_CHARS = 300
+TURBO_INTER_CHUNK_PAUSE_MS = 80
 
-OFFICIAL_TURBO_STANDARD_PROFILE: dict[str, Any] = {
-    # Matches Resemble AI's current official Turbo Gradio defaults.
-    "temperature": 0.80,
-    "exaggeration": 0.0,
-    "cfg_weight": 0.0,
-    "repetition_penalty": 1.20,
+# Official Turbo Gradio defaults (seed 0 means random there).
+OFFICIAL_TURBO_PROFILE: dict[str, Any] = {
+    "model": "chatterbox-turbo",
+    "language": "en",
+    "temperature": 0.8,
+    "exaggeration": 0.0,      # ignored by Turbo
+    "cfg_weight": 0.0,        # ignored by Turbo
+    "repetition_penalty": 1.2,
     "min_p": 0.0,
     "top_p": 0.95,
     "top_k": 1000,
     "speed_factor": 1.0,
-    "inter_chunk_pause_ms": 0,
-    "language": "en",
-    "split_text": False,
+    "split_text": True,
+    "chunk_words": 50,        # UI compatibility only; char cap owns splitting
+    "inter_chunk_pause_ms": TURBO_INTER_CHUNK_PAUSE_MS,
+    "output_format": "wav",
+    "senior_pace_profile": "70s",  # compatibility only; never applied
     "quality_gate": False,
     "speaker_consistency": False,
     "platform_assets": False,
 }
 
-MOTIVATIONAL_TURBO_PROFILE: dict[str, Any] = {
-    # Turbo has no CFG/exaggeration control. Keep sampling deliberately tighter
-    # than the generic defaults so independent long-form chunks are less likely
-    # to jump into an excited/angry prosody or garble a phrase.
-    "temperature": 0.60,
-    "exaggeration": 0.0,
-    "cfg_weight": 0.0,
-    "repetition_penalty": 1.18,
-    "min_p": 0.0,
-    "top_p": 0.85,
-    "top_k": 600,
-    # Age-aware target bands own the final senior-advisor pace. 85 words
-    # is a stability/speed compromise: it limits within-chunk prosody drift while
-    # retaining most of Turbo's long-form speed advantage on an L4.
-    "speed_factor": 1.0,
-    "chunk_words": 85,
-    # Keep chunk joins to a human breath-sized pause. The Excessive Silence Guard
-    # below handles any multi-second silence hallucinated *inside* a Turbo chunk.
-    "inter_chunk_pause_ms": 220,
-    # Turbo is English-only. This locks the server path to English text processing;
-    # cloned accent identity can still be inherited from the reference recording.
-    "language": "en",
-    # Fast Professional QC: preserve the speech/mastering pipeline but move heavy
-    # ASR + speaker verification to one final-file pass.
-    "_fast_professional_qc": True,
-}
+# Keep the user's current louder delivery while making the processing transparent:
+# two-pass EBU loudness normalisation only, with no EQ/compression/tempo/prosody work.
+FINAL_TARGET_LUFS = -12.5
+FINAL_TRUE_PEAK_DBFS = -0.8
+FINAL_LRA = 11.0
 
-MOTIVATIONAL_TURBO_RETRY_PROFILE: dict[str, Any] = {
-    "temperature": 0.50,
-    "top_p": 0.80,
-    "top_k": 400,
-}
+_SENTENCE_RE = re.compile(r"(?<=[.!?])(?:[\"'”’)]*)\s+")
 
-TURBO_CHUNK_TARGET_RMS_DBFS = -17.0
-TURBO_CHUNK_PEAK_CEILING_DBFS = -1.5
-TURBO_FINAL_TARGET_LUFS = -12.5
-TURBO_FINAL_TRUE_PEAK_DBFS = -0.8
 
-PROFESSIONAL_MODELS = {"chatterbox", "chatterbox-turbo"}
+def _normalise_space(text: str) -> str:
+    return " ".join(text.replace("\r\n", "\n").replace("\r", "\n").split())
 
-MOTIVATIONAL_ORIGINAL_PROFILE: dict[str, Any] = {
-    "temperature": 0.72,
-    "exaggeration": 0.58,
-    "cfg_weight": 0.35,
-    "repetition_penalty": 1.20,
-    "min_p": 0.05,
-    "top_p": 1.0,
-    "top_k": 1000,
-    "speed_factor": 1.0,
-    "chunk_words": 85,
-    "inter_chunk_pause_ms": 220,
-    "language": "en",
-}
 
-MOTIVATIONAL_ORIGINAL_RETRY_PROFILE: dict[str, Any] = {
-    "temperature": 0.60,
-    "exaggeration": 0.52,
-    "cfg_weight": 0.32,
-}
+def _split_oversize_piece(piece: str, max_chars: int) -> list[str]:
+    """Split one >max_chars span without dropping or rewriting any characters.
 
-# Original has no native text emotion tokens. Apply a local, model-native expression
-# delta only to the compact emotion segment. Resemble's guidance for expressive
-# Original speech is higher exaggeration with CFG around 0.3; these caps keep senior
-# narration controlled rather than theatrical.
-ORIGINAL_EMOTION_PROFILE: dict[str, dict[str, float]] = {
-    "narration": {"temperature_delta": -0.02, "exaggeration_delta": 0.05, "cfg_ceiling": 0.34},
-    "happy": {"temperature_delta": 0.00, "exaggeration_delta": 0.10, "cfg_ceiling": 0.32},
-    "surprised": {"temperature_delta": -0.02, "exaggeration_delta": 0.16, "cfg_ceiling": 0.30},
-    "dramatic": {"temperature_delta": -0.04, "exaggeration_delta": 0.18, "cfg_ceiling": 0.28},
-}
+    Prefer punctuation and whitespace near the limit.  The rejoined chunks, after
+    whitespace normalisation, are guaranteed to equal the source span.
+    """
+    remaining = piece.strip()
+    output: list[str] = []
+    while len(remaining) > max_chars:
+        window = remaining[: max_chars + 1]
+        low = max(1, int(max_chars * 0.55))
+        candidates = [
+            window.rfind(";", low, max_chars + 1),
+            window.rfind(":", low, max_chars + 1),
+            window.rfind(",", low, max_chars + 1),
+            window.rfind(" ", low, max_chars + 1),
+        ]
+        cut = max(candidates)
+        if cut < low:
+            cut = window.rfind(" ", 1, max_chars + 1)
+        if cut <= 0:
+            cut = max_chars
+        # Keep punctuation in the left chunk; split whitespace itself away only as
+        # normal sentence spacing. Chatterbox already normalises repeated whitespace.
+        if remaining[cut:cut + 1] in {";", ":", ","}:
+            cut += 1
+        left = remaining[:cut].strip()
+        if not left:
+            cut = max_chars
+            left = remaining[:cut].strip()
+        output.append(left)
+        remaining = remaining[cut:].strip()
+    if remaining:
+        output.append(remaining)
+    return output
+
+
+def split_turbo_long_text(text: str, max_chars: int = TURBO_MAX_CHARS) -> list[str]:
+    """Sentence-safe Chatterbox Turbo chunks capped at ``max_chars``.
+
+    This is deliberately not a narration pipeline. It only groups the creator's
+    original text into model-safe calls.  No words, punctuation or wording are
+    intentionally added, removed or replaced.
+    """
+    clean = text.strip()
+    if not clean:
+        return []
+
+    paragraphs = [part.strip() for part in re.split(r"\n\s*\n+", clean) if part.strip()]
+    atomic: list[str] = []
+    for paragraph in paragraphs:
+        sentences = [part.strip() for part in _SENTENCE_RE.split(paragraph) if part.strip()]
+        if not sentences:
+            sentences = [paragraph]
+        for sentence in sentences:
+            if len(sentence) <= max_chars:
+                atomic.append(sentence)
+            else:
+                atomic.extend(_split_oversize_piece(sentence, max_chars))
+
+    chunks: list[str] = []
+    current = ""
+    for piece in atomic:
+        candidate = piece if not current else f"{current} {piece}"
+        if len(candidate) <= max_chars:
+            current = candidate
+            continue
+        if current:
+            chunks.append(current)
+        current = piece
+    if current:
+        chunks.append(current)
+
+    # Defensive integrity gate. If our own splitter ever loses creator text, fail
+    # before spending GPU time rather than synthesize an incomplete script.
+    if _normalise_space(" ".join(chunks)) != _normalise_space(clean):
+        raise RuntimeError("Internal Turbo text splitting changed the script. Generation was stopped before TTS.")
+    if any(len(chunk) > max_chars for chunk in chunks):
+        raise RuntimeError("Internal Turbo text splitting produced an oversized chunk.")
+    return chunks
+
 
 class QueueManager:
-    """Single-worker GPU queue for up to five prepared audio jobs.
+    """Simple single-GPU Chatterbox Turbo queue.
 
-    The browser may navigate between tabs, minimise the progress dialog or reload;
-    generation remains owned by this server-side worker.
+    v1.6.0 intentionally restores the fast, direct Turbo generation architecture.
+    The only output processing after model generation is final loudness normalisation.
     """
 
     def __init__(self, engine: EngineService, storage: Storage) -> None:
@@ -150,7 +164,6 @@ class QueueManager:
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="softmeta-tts")
         self._waiters: dict[str, asyncio.Event] = {}
         self._last_persist = 0.0
-        self.quality = QualityController()
 
         for job in self.jobs.values():
             if job.get("status") in ACTIVE_STATES:
@@ -187,7 +200,6 @@ class QueueManager:
     def public_job(self, job: dict[str, Any]) -> dict[str, Any]:
         data = dict(job)
         data.pop("cancel_requested", None)
-        data.pop("generation_text", None)
         data["queue_position"] = self._queue_positions().get(job["id"])
         if data.get("started_at"):
             end = data.get("completed_at") or time.time()
@@ -213,344 +225,11 @@ class QueueManager:
 
     @staticmethod
     def _effective_options(request: AudioJobCreate) -> dict[str, Any]:
-        options = request.options.model_dump()
-        model_name = options.get("model")
-
-        # Standard button = clean Turbo A/B baseline.  No SoftMeta speech pipeline,
-        # no Auto Emotion, no QC rerendering, no post master, no captions.  Sampling
-        # values match Resemble AI's official Turbo Gradio app.  Seed 0 in that app
-        # means random, so resolve one random torch seed here instead of pinning zero.
-        if request.generation_mode == "standard" and model_name == "chatterbox-turbo":
-            options.update(OFFICIAL_TURBO_STANDARD_PROFILE)
-            options["seed"] = secrets.randbelow(2_147_483_646) + 1
-            options["_official_turbo_baseline"] = True
-            return options
-
-        if request.preset == "Motivational Speech":
-            if model_name == "chatterbox-turbo":
-                options.update(MOTIVATIONAL_TURBO_PROFILE)
-            elif model_name == "chatterbox":
-                # Original is intentionally frozen at its v1.5.5 behavior.
-                options.update({
-                    "chunk_words": MOTIVATIONAL_ORIGINAL_PROFILE["chunk_words"],
-                    "inter_chunk_pause_ms": MOTIVATIONAL_ORIGINAL_PROFILE["inter_chunk_pause_ms"],
-                    "language": MOTIVATIONAL_ORIGINAL_PROFILE["language"],
-                })
+        # Ignore legacy/local-storage tuning values. Every Generate Audio request is
+        # deliberately restored to the official Turbo defaults.
+        options = dict(OFFICIAL_TURBO_PROFILE)
+        options["seed"] = secrets.randbelow(2_147_483_646) + 1
         return options
-
-    @staticmethod
-    def _original_chunk_direction(
-        chunk: str,
-        options: dict[str, Any],
-        emotion_tag: str | None = None,
-    ) -> tuple[str, dict[str, Any]]:
-        directed = dict(options)
-        is_quality_retry = bool(directed.pop("_quality_retry", False))
-        # Retry first establishes a safer base; local expression is then re-applied
-        # within restrained caps. v1.5.3 applied retry *after* emotion, which silently
-        # removed Original's expression whenever QC requested a second pass.
-        if is_quality_retry:
-            directed.update(MOTIVATIONAL_ORIGINAL_RETRY_PROFILE)
-
-        tag = (emotion_tag or emotion_tag_for_text(chunk) or "").lower() or None
-        profile = ORIGINAL_EMOTION_PROFILE.get(tag or "")
-        if profile:
-            base_temperature = float(directed.get("temperature", 0.72))
-            base_exaggeration = float(directed.get("exaggeration", 0.58))
-            base_cfg = float(directed.get("cfg_weight", 0.35))
-            directed["temperature"] = float(np.clip(base_temperature + profile["temperature_delta"], 0.45, 0.90))
-            directed["exaggeration"] = float(np.clip(base_exaggeration + profile["exaggeration_delta"], 0.50, 0.82))
-            directed["cfg_weight"] = float(np.clip(min(base_cfg, profile["cfg_ceiling"]), 0.22, 0.45))
-            directed["_emotion_tag"] = tag
-        return strip_turbo_tags(chunk).strip(), directed
-
-    @staticmethod
-    def _apply_final_tempo(output_path: Path, speed_factor: float) -> None:
-        """Apply pitch-preserving playback tempo once after all chunks are joined."""
-        if abs(speed_factor - 1.0) <= 0.001:
-            return
-        temp_path = output_path.with_name(output_path.stem + ".tempo.wav")
-        temp_path.unlink(missing_ok=True)
-        try:
-            subprocess.run(
-                [
-                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-                    "-i", str(output_path),
-                    "-filter:a", f"atempo={speed_factor:.6f}",
-                    "-c:a", "pcm_s16le",
-                    str(temp_path),
-                ],
-                check=True,
-            )
-            temp_path.replace(output_path)
-        except (FileNotFoundError, subprocess.CalledProcessError):
-            temp_path.unlink(missing_ok=True)
-            raise RuntimeError(
-                "Pitch-preserving speed adjustment requires FFmpeg. "
-                "Install ffmpeg and try again."
-            )
-
-
-    @staticmethod
-    def _compact_excessive_silence(
-        audio: np.ndarray,
-        sample_rate: int,
-        *,
-        min_silence_ms: int = 900,
-        internal_pause_ms: int = 340,
-        leading_pause_ms: int = 80,
-        trailing_pause_ms: int = 120,
-    ) -> np.ndarray:
-        """Collapse only abnormally long dead-air regions in Turbo output.
-
-        Chatterbox Turbo can occasionally emit several seconds of near-silence after
-        punctuation or an expressive-token boundary. That silence is inside the
-        generated waveform, so changing the server's inter-chunk pause cannot fix it.
-        Short natural breaths remain untouched; only near-silence lasting at least
-        ``min_silence_ms`` is replaced with a clean human-sized pause.
-        """
-        data = np.asarray(audio, dtype=np.float32).reshape(-1).copy()
-        if data.size == 0 or sample_rate <= 0:
-            return data
-        data = np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)
-
-        frame_samples = max(1, int(round(sample_rate * 0.020)))
-        frame_count = int(math.ceil(data.size / frame_samples))
-        padded = np.pad(data, (0, frame_count * frame_samples - data.size))
-        frames = padded.reshape(frame_count, frame_samples)
-        rms = np.sqrt(np.mean(np.square(frames, dtype=np.float64), axis=1) + 1e-12)
-        db = 20.0 * np.log10(np.maximum(rms, 1e-6))
-
-        # Adaptive threshold: far enough below speech to preserve quiet syllables and
-        # normal breaths, but high enough to recognize low-level generated room hiss.
-        speech_reference = float(np.percentile(db, 80))
-        silence_threshold = float(np.clip(speech_reference - 27.0, -50.0, -38.0))
-        silent = db <= silence_threshold
-        min_frames = max(1, int(math.ceil(min_silence_ms / 20.0)))
-
-        runs: list[tuple[int, int]] = []
-        start: int | None = None
-        for index, is_silent in enumerate(silent):
-            if is_silent and start is None:
-                start = index
-            elif not is_silent and start is not None:
-                if index - start >= min_frames:
-                    runs.append((start, index))
-                start = None
-        if start is not None and frame_count - start >= min_frames:
-            runs.append((start, frame_count))
-        if not runs:
-            return data
-
-        parts: list[np.ndarray] = []
-        cursor = 0
-        edge_tolerance = frame_samples * 2
-        for start_frame, end_frame in runs:
-            start_sample = min(data.size, start_frame * frame_samples)
-            end_sample = min(data.size, end_frame * frame_samples)
-            if start_sample < cursor or end_sample <= start_sample:
-                continue
-            parts.append(data[cursor:start_sample])
-            is_leading = start_sample <= edge_tolerance
-            is_trailing = end_sample >= data.size - edge_tolerance
-            if is_leading:
-                keep_ms = leading_pause_ms
-            elif is_trailing:
-                keep_ms = trailing_pause_ms
-            else:
-                keep_ms = internal_pause_ms
-            keep_samples = max(0, int(round(sample_rate * keep_ms / 1000.0)))
-            if keep_samples:
-                # Use true digital silence so generated hiss/box noise in an abnormal
-                # pause is not carried into the final narration.
-                parts.append(np.zeros(keep_samples, dtype=np.float32))
-            cursor = end_sample
-        parts.append(data[cursor:])
-        compacted = np.concatenate(parts) if parts else data
-        return compacted.astype(np.float32, copy=False)
-
-    @staticmethod
-    def _audio_metrics(audio: np.ndarray, sample_rate: int, words: int) -> dict[str, float]:
-        data = np.asarray(audio, dtype=np.float32).reshape(-1)
-        if data.size == 0:
-            return {"rms_dbfs": -120.0, "peak_dbfs": -120.0, "seconds_per_word": 0.0}
-        data = np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)
-        rms = float(np.sqrt(np.mean(np.square(data, dtype=np.float64)) + 1e-12))
-        peak = float(np.max(np.abs(data)))
-        duration = data.size / max(sample_rate, 1)
-        return {
-            "rms_dbfs": 20.0 * math.log10(max(rms, 1e-6)),
-            "peak_dbfs": 20.0 * math.log10(max(peak, 1e-6)),
-            "seconds_per_word": duration / max(words, 1),
-            "word_count": float(max(words, 0)),
-        }
-
-    @staticmethod
-    def _level_professional_chunk(audio: np.ndarray, emotion_tag: str | None = None) -> np.ndarray:
-        """Correct only real level outliers while preserving expressive dynamics.
-
-        v1.5.3 forced every accepted chunk to the same RMS target. That solved random
-        volume jumps but also flattened the natural energy difference created by Turbo
-        tags and Original exaggeration. Keep a professional target *band* instead.
-        """
-        data = np.asarray(audio, dtype=np.float32).reshape(-1).copy()
-        if data.size == 0:
-            return data
-        data = np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)
-        rms = float(np.sqrt(np.mean(np.square(data, dtype=np.float64)) + 1e-12))
-        if rms > 1e-6:
-            current_db = 20.0 * math.log10(rms)
-            expressive = bool(emotion_tag)
-            low_db, high_db = (-20.5, -13.0) if expressive else (-20.0, -14.5)
-            target_db = -16.2 if expressive else TURBO_CHUNK_TARGET_RMS_DBFS
-            if current_db < low_db or current_db > high_db:
-                gain_db = float(np.clip(target_db - current_db, -7.0, 9.0))
-                data *= 10.0 ** (gain_db / 20.0)
-        peak = float(np.max(np.abs(data)))
-        ceiling_db = -1.2 if emotion_tag else TURBO_CHUNK_PEAK_CEILING_DBFS
-        ceiling = 10.0 ** (ceiling_db / 20.0)
-        if peak > ceiling and peak > 0.0:
-            data *= ceiling / peak
-        return data
-
-    @staticmethod
-    def _level_turbo_chunk(audio: np.ndarray) -> np.ndarray:
-        """Legacy strict Turbo leveler retained for backward compatibility/tests.
-
-        Production v1.5.4 uses ``_level_professional_chunk`` so intentional emotion
-        energy is not normalized away. This helper keeps the prior public behavior.
-        """
-        data = np.asarray(audio, dtype=np.float32).reshape(-1).copy()
-        if data.size == 0:
-            return data
-        data = np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)
-        rms = float(np.sqrt(np.mean(np.square(data, dtype=np.float64)) + 1e-12))
-        if rms > 1e-6:
-            current_db = 20.0 * math.log10(rms)
-            gain_db = float(np.clip(TURBO_CHUNK_TARGET_RMS_DBFS - current_db, -12.0, 24.0))
-            data *= 10.0 ** (gain_db / 20.0)
-        peak = float(np.max(np.abs(data)))
-        ceiling = 10.0 ** (TURBO_CHUNK_PEAK_CEILING_DBFS / 20.0)
-        if peak > ceiling and peak > 0.0:
-            data *= ceiling / peak
-        return data
-
-    @staticmethod
-    def _turbo_chunk_is_unstable(
-        metrics: dict[str, float],
-        history: list[dict[str, float]],
-        *,
-        intentional_emotion: bool = False,
-    ) -> bool:
-        """Detect obvious Turbo chunk drift without adding an ASR dependency."""
-        rms_db = metrics["rms_dbfs"]
-        spw = metrics["seconds_per_word"]
-        word_count = int(round(float(metrics.get("word_count", 0.0))))
-        short_span = 0 < word_count < 18
-        if not math.isfinite(rms_db) or not math.isfinite(spw) or spw <= 0.0:
-            return True
-        if rms_db > -6.0 or rms_db < -48.0:
-            return True
-        # Only absurd timing remains an absolute retry hint. Normal short-tail and
-        # native-event timing is intentionally exempt because seconds-per-word is
-        # statistically noisy on a handful of words and includes non-verbal events.
-        if spw < 0.05 or spw > 3.50:
-            return True
-        if not short_span and not intentional_emotion and (spw < 0.16 or spw > 0.90):
-            return True
-        if len(history) < 2 or short_span:
-            return False
-        # Native Turbo emotion tokens intentionally alter prosody. For those chunks,
-        # skip history-relative speaking-rate drift while keeping RMS sanity above.
-        if intentional_emotion:
-            return False
-        recent = history[-5:]
-        median_rms = float(np.median([item["rms_dbfs"] for item in recent]))
-        median_spw = float(np.median([item["seconds_per_word"] for item in recent]))
-        # Sudden loudness or speaking-rate jumps are strong proxies for the
-        # angry/fast/garbled chunk failures observed in long Turbo narration.
-        if rms_db > median_rms + 5.0 or rms_db < median_rms - 9.0:
-            return True
-        if median_spw > 0.0 and (spw < median_spw * 0.62 or spw > median_spw * 1.65):
-            return True
-        return False
-
-    @staticmethod
-    def _chunk_distance_from_history(
-        metrics: dict[str, float],
-        history: list[dict[str, float]],
-    ) -> float:
-        if not history:
-            return 0.0
-        recent = history[-5:]
-        median_rms = float(np.median([item["rms_dbfs"] for item in recent]))
-        median_spw = float(np.median([item["seconds_per_word"] for item in recent]))
-        rms_distance = abs(metrics["rms_dbfs"] - median_rms) / 6.0
-        speed_distance = abs(metrics["seconds_per_word"] - median_spw) / max(median_spw, 0.1)
-        return rms_distance + speed_distance
-
-    @staticmethod
-    def _normalize_turbo_loudness(output_path: Path) -> None:
-        """Two-pass EBU R128 mastering for predictable Turbo output loudness.
-
-        The first pass measures the complete narration. The second pass uses those
-        measurements for linear loudness correction, which is much more reliable
-        than the previous one-pass filter when long files contain a few unusually
-        loud chunks.
-        """
-        info = sf.info(output_path)
-        temp_path = output_path.with_name(output_path.stem + ".loud.wav")
-        temp_path.unlink(missing_ok=True)
-        base_filter = (
-            f"loudnorm=I={TURBO_FINAL_TARGET_LUFS:.1f}:"
-            f"TP={TURBO_FINAL_TRUE_PEAK_DBFS:.1f}:LRA=5.0"
-        )
-        try:
-            measure = subprocess.run(
-                [
-                    "ffmpeg", "-hide_banner", "-nostats", "-loglevel", "info",
-                    "-i", str(output_path),
-                    "-af", base_filter + ":print_format=json",
-                    "-f", "null", "-",
-                ],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            stderr = measure.stderr
-            json_start = stderr.rfind("{")
-            json_end = stderr.rfind("}")
-            if json_start < 0 or json_end <= json_start:
-                raise RuntimeError("FFmpeg did not return Turbo loudness measurements.")
-            measured = json.loads(stderr[json_start:json_end + 1])
-            second_filter = (
-                base_filter
-                + f":measured_I={float(measured['input_i']):.2f}"
-                + f":measured_TP={float(measured['input_tp']):.2f}"
-                + f":measured_LRA={float(measured['input_lra']):.2f}"
-                + f":measured_thresh={float(measured['input_thresh']):.2f}"
-                + f":offset={float(measured['target_offset']):.2f}"
-                + ":linear=true:print_format=summary"
-            )
-            subprocess.run(
-                [
-                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-                    "-i", str(output_path),
-                    "-filter:a", second_filter,
-                    "-ar", str(info.samplerate),
-                    "-ac", "1",
-                    "-c:a", "pcm_s16le",
-                    str(temp_path),
-                ],
-                check=True,
-            )
-            temp_path.replace(output_path)
-        except (FileNotFoundError, subprocess.CalledProcessError, KeyError, ValueError, json.JSONDecodeError) as error:
-            temp_path.unlink(missing_ok=True)
-            raise RuntimeError(
-                "Turbo loudness normalisation requires a working FFmpeg loudnorm filter. "
-                "Install FFmpeg and try again."
-            ) from error
 
     async def create(self, request: AudioJobCreate, enqueue: bool = True) -> dict[str, Any]:
         total_words = count_words(request.text)
@@ -558,59 +237,19 @@ class QueueManager:
             raise ValueError("The script is empty.")
         job_id = uuid.uuid4().hex
         now = time.time()
-        effective_options = self._effective_options(request)
-        # The new Standard baseline exists only for Turbo. Original is intentionally
-        # frozen: if the shared UI sends "standard" while Original is selected, keep
-        # running the same existing professional path it used before v1.5.6.
-        generation_mode = request.generation_mode
-        if effective_options.get("model") != "chatterbox-turbo" and generation_mode == "standard":
-            generation_mode = "advanced"
-
-        # v1.5.10 keeps the v1.5.7 single creator-facing Generate Audio path: the professional
-        # pipeline. Auto Emotion is an independent opt-in control. When it is off,
-        # the same clear-speech / pacing / mastering pipeline runs without inserting
-        # any automatic Turbo event tags. Original remains on its frozen legacy path.
-        generation_text = request.text
-        emotion_summary: dict[str, Any] | None = None
-        auto_emotion = bool(
-            request.auto_emotion
-            and generation_mode == "advanced"
-            and request.preset == "Motivational Speech"
-            and effective_options.get("model") == "chatterbox-turbo"
-        )
-        if (
-            generation_mode == "advanced"
-            and request.preset == "Motivational Speech"
-            and effective_options.get("model") in PROFESSIONAL_MODELS
-        ):
-            if effective_options.get("model") == "chatterbox-turbo":
-                source_text = request.text
-                if auto_emotion:
-                    emotion_analysis = analyze_turbo_avatar_performance(request.text)
-                    source_text = emotion_analysis.tagged_text
-                    emotion_summary = emotion_analysis.public_summary(include_text=False)
-                pronounced = prepare_pronunciation_text(source_text)
-                generation_text = prepare_senior_clear_speech_text(pronounced)
-            else:
-                # Chatterbox Original is intentionally unchanged from v1.5.6.
-                emotion_analysis = analyze_serious_senior_advisor(request.text)
-                pronounced = prepare_pronunciation_text(emotion_analysis.tagged_text)
-                generation_text = prepare_senior_clear_speech_text(pronounced)
-                emotion_summary = emotion_analysis.public_summary(include_text=False)
+        options = self._effective_options(request)
         job = {
             "id": job_id,
-            "preset": request.preset,
-            "generation_mode": generation_mode,
-            "auto_emotion": auto_emotion,
+            "preset": "Chatterbox Turbo Default",
+            "generation_mode": "standard",
+            "auto_emotion": False,
             "monitor_dismissed": False,
             "audio_number": request.audio_number,
             "title": request.title.strip(),
             "text": request.text,
-            "generation_text": generation_text,
-            "emotion_summary": emotion_summary,
             "voice_mode": request.voice_mode,
             "voice_filename": request.voice_filename,
-            "options": effective_options,
+            "options": options,
             "status": "queued" if enqueue else "draft",
             "stage": "Waiting in queue" if enqueue else "Draft",
             "total_words": total_words,
@@ -619,9 +258,7 @@ class QueueManager:
             "percent": 0.0,
             "remaining_percent": 100.0,
             "eta_seconds": None,
-            "estimated_audio_seconds": round(
-                estimated_audio_seconds(total_words, float(effective_options["speed_factor"])), 1
-            ),
+            "estimated_audio_seconds": round(estimated_audio_seconds(total_words, 1.0), 1),
             "actual_audio_seconds": None,
             "output_filename": None,
             "video_master_filename": None,
@@ -630,6 +267,7 @@ class QueueManager:
             "quality_summary": None,
             "reference_quality": None,
             "mastering_profile": None,
+            "prosody_summary": None,
             "error": None,
             "cancel_requested": False,
             "created_at": now,
@@ -644,10 +282,7 @@ class QueueManager:
         return self.public_job(job)
 
     async def create_many(self, requests: list[AudioJobCreate]) -> list[dict[str, Any]]:
-        created: list[dict[str, Any]] = []
-        for request in requests:
-            created.append(await self.create(request, enqueue=True))
-        return created
+        return [await self.create(request, enqueue=True) for request in requests]
 
     async def cancel(self, job_id: str) -> dict[str, Any]:
         job = self.get_raw(job_id)
@@ -660,20 +295,14 @@ class QueueManager:
             job["completed_at"] = time.time()
             self._signal(job_id)
         else:
-            job["stage"] = "Cancellation requested; waiting for the current model pass"
+            job["stage"] = "Cancellation requested; waiting for the current Turbo pass"
         self._persist(force=True)
         return self.public_job(job)
 
     async def dismiss_from_monitor(self, job_id: str) -> dict[str, Any]:
-        """Hide one finished card from Queue Monitor without deleting its audio.
-
-        The creator may still be using the generated WAV in the Audio workspace, so
-        Queue Monitor cleanup must not orphan that player/download. The dismissed
-        flag is persisted with the job and survives browser reloads.
-        """
         job = self.get_raw(job_id)
         if job.get("status") in ACTIVE_STATES:
-            raise RuntimeError("Active jobs cannot be removed from history. Wait for generation or cancel the job first.")
+            raise RuntimeError("Active jobs cannot be hidden from the Queue Monitor.")
         job["monitor_dismissed"] = True
         self._persist(force=True)
         return self.public_job(job)
@@ -748,13 +377,7 @@ class QueueManager:
         job["percent"] = round(percent, 1)
         job["remaining_percent"] = round(max(0.0, 100.0 - percent), 1)
 
-    async def _smooth_words(
-        self,
-        job: dict[str, Any],
-        base_words: int,
-        active_words: int,
-        expected_seconds: float,
-    ) -> None:
+    async def _smooth_words(self, job: dict[str, Any], base_words: int, active_words: int, expected_seconds: float) -> None:
         started = time.monotonic()
         try:
             while job["status"] == "running":
@@ -771,75 +394,71 @@ class QueueManager:
         except asyncio.CancelledError:
             pass
 
+    @staticmethod
+    def _normalise_loudness(output_path: Path) -> dict[str, float | str]:
+        """Keep current loud volume with loudness-only post processing.
+
+        Two-pass loudnorm is retained solely because the user explicitly wants the
+        current output level. No EQ, compression, de-essing, tempo, silence shaping,
+        prosody processing or per-chunk levelling is used.
+        """
+        info = sf.info(output_path)
+        temp_path = output_path.with_name(output_path.stem + ".volume.wav")
+        temp_path.unlink(missing_ok=True)
+        base = (
+            f"loudnorm=I={FINAL_TARGET_LUFS:.1f}:TP={FINAL_TRUE_PEAK_DBFS:.1f}:"
+            f"LRA={FINAL_LRA:.1f}:print_format=json"
+        )
+        try:
+            first = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-nostats", "-i", str(output_path), "-af", base, "-f", "null", "-"],
+                check=True, capture_output=True, text=True,
+            )
+            stderr = first.stderr
+            start = stderr.rfind("{")
+            end = stderr.rfind("}")
+            if start < 0 or end <= start:
+                raise ValueError("FFmpeg loudness analysis did not return JSON.")
+            measured = json.loads(stderr[start:end + 1])
+            second_filter = (
+                f"loudnorm=I={FINAL_TARGET_LUFS:.1f}:TP={FINAL_TRUE_PEAK_DBFS:.1f}:LRA={FINAL_LRA:.1f}:"
+                f"measured_I={float(measured['input_i']):.2f}:"
+                f"measured_LRA={float(measured['input_lra']):.2f}:"
+                f"measured_TP={float(measured['input_tp']):.2f}:"
+                f"measured_thresh={float(measured['input_thresh']):.2f}:"
+                f"offset={float(measured['target_offset']):.2f}:linear=true:print_format=summary"
+            )
+            subprocess.run(
+                [
+                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(output_path),
+                    "-af", second_filter, "-ar", str(info.samplerate), "-ac", "1", "-c:a", "pcm_s16le",
+                    str(temp_path),
+                ],
+                check=True,
+            )
+            temp_path.replace(output_path)
+            return {
+                "profile": "loudness-only",
+                "target_lufs": FINAL_TARGET_LUFS,
+                "true_peak_dbfs": FINAL_TRUE_PEAK_DBFS,
+            }
+        except (FileNotFoundError, subprocess.CalledProcessError, KeyError, ValueError, json.JSONDecodeError) as error:
+            temp_path.unlink(missing_ok=True)
+            raise RuntimeError("Final volume boost requires a working FFmpeg loudnorm filter.") from error
+
     async def _process(self, job: dict[str, Any]) -> None:
         job["status"] = "running"
-        job["stage"] = "Preparing text and voice"
+        job["stage"] = "Preparing Chatterbox Turbo"
         job["started_at"] = time.time()
         job["error"] = None
         self._persist(force=True)
 
         options = job["options"]
-        model_name = str(options.get("model"))
-        standard_turbo = bool(
-            job.get("generation_mode") == "standard"
-            and model_name == "chatterbox-turbo"
-        )
-        professional_mode = (
-            job.get("generation_mode", "advanced") == "advanced"
-            and job.get("preset") == "Motivational Speech"
-            and model_name in PROFESSIONAL_MODELS
-        )
-        professional_longform = professional_mode and options.get("split_text", True)
-        fast_professional_qc = bool(
-            professional_mode
-            and model_name == "chatterbox-turbo"
-            and options.get("_fast_professional_qc", False)
-            and callable(getattr(self.quality, "evaluate_acoustic", None))
-            and callable(getattr(self.quality, "evaluate_final_file", None))
-        )
-
-        directed_segments = []
-        if professional_longform:
-            retention_positions = [
-                int(item.get("word_position", -1))
-                for item in (job.get("emotion_summary") or {}).get("placements", [])
-                if item.get("source") == "retention-reset" and int(item.get("word_position", -1)) >= 0
-            ]
-            directed_segments = build_long_form_segments(
-                job.get("generation_text") or job["text"],
-                max_words=int(options["chunk_words"]),
-                heading_detector=is_heading,
-                retention_positions=retention_positions,
-                age_profile=str(options.get("senior_pace_profile", "70s")),
-                turbo_avatar_mode=model_name == "chatterbox-turbo",
-                avatar_window_words=int((job.get("emotion_summary") or {}).get("avatar_window_words") or 0),
-            )
-            chunks = [segment.text for segment in directed_segments]
-        else:
-            chunks = (
-                split_text(
-                    job.get("generation_text") or job["text"],
-                    int(options["chunk_words"]),
-                    prefer_clauses=professional_mode,
-                )
-                if options.get("split_text", True)
-                else [(job.get("generation_text") or job["text"]).strip()]
-            )
-            chunks = [chunk for chunk in chunks if chunk]
+        chunks = split_turbo_long_text(job["text"], TURBO_MAX_CHARS)
         if not chunks:
             raise ValueError("The script is empty.")
 
         voice_path = self._resolve_voice(job)
-        if professional_mode and voice_path is not None:
-            job["stage"] = "Checking reference voice"
-            reference_quality = await asyncio.to_thread(analyze_reference_voice, voice_path)
-            job["reference_quality"] = reference_quality
-            if not reference_quality.get("usable", True) and reference_quality.get("rating") == "Unreadable":
-                raise RuntimeError("The selected reference voice could not be decoded. Upload a clean voice sample.")
-            if model_name == "chatterbox-turbo" and float(reference_quality.get("duration_seconds", 99)) < 5.1:
-                raise RuntimeError("Chatterbox Turbo needs a reference longer than 5 seconds. Use a clean 10–20 second clip.")
-            self._persist(force=True)
-
         title = safe_filename(job["title"] or f"Audio_{job['audio_number']}")
         output_filename = f"Audio_{job['audio_number']}_{title}_{job['id'][:8]}.wav"
         output_path = self.storage.output_path(output_filename)
@@ -848,328 +467,40 @@ class QueueManager:
         completed_words = 0
         started_monotonic = time.monotonic()
         output_file: sf.SoundFile | None = None
-        turbo_metric_history: list[dict[str, float]] = []
-        speaker_history: list[float] = []
-        quality_reports = []
-        quality_retries = 0
-        caption_asr_words: list[dict[str, Any]] = []
-        caption_asr_complete = True
-        written_seconds = 0.0
         loop = asyncio.get_running_loop()
-
-        async def render_once(chunk: str, segment, chunk_options: dict[str, Any]) -> tuple[Any, np.ndarray, str, dict[str, float]]:
-            spoken_chunk = chunk
-            effective_chunk_options = dict(chunk_options)
-            segment_emotion = getattr(segment, "emotion_tag", None) if segment is not None else emotion_tag_for_text(chunk)
-            if model_name == "chatterbox":
-                spoken_chunk, effective_chunk_options = self._original_chunk_direction(
-                    chunk, effective_chunk_options, segment_emotion
-                )
-
-            result = await loop.run_in_executor(
-                self.executor,
-                lambda: self.engine.generate(
-                    spoken_chunk,
-                    model_name=model_name,
-                    reference_audio=voice_path,
-                    language=effective_chunk_options["language"],
-                    options=effective_chunk_options,
-                ),
-            )
-            audio = result.waveform.squeeze().numpy().astype(np.float32, copy=False)
-            if professional_mode:
-                audio = shape_professional_pauses(audio, result.sample_rate)
-                if segment is not None and audio.size:
-                    chunk_words_local = count_words(strip_turbo_tags(spoken_chunk))
-                    duration_seconds = audio.size / max(result.sample_rate, 1)
-                    current_wpm = (chunk_words_local * 60.0 / duration_seconds) if duration_seconds > 0 else 0.0
-                    speed_bias = float(options.get("speed_factor", 1.0))
-                    target_wpm = float(segment.target_wpm) * speed_bias
-                    min_wpm = float(segment.min_wpm) * speed_bias
-                    max_wpm = float(segment.max_wpm) * speed_bias
-                    tempo = adaptive_tempo_factor(
-                        current_wpm=current_wpm,
-                        target_wpm=target_wpm,
-                        min_wpm=min_wpm,
-                        max_wpm=max_wpm,
-                    )
-                    if abs(tempo - 1.0) > 0.002:
-                        audio = await asyncio.to_thread(apply_tempo_array, audio, result.sample_rate, tempo)
-                        audio = shape_professional_pauses(audio, result.sample_rate)
-                audio = self._level_professional_chunk(audio, segment_emotion)
-            raw_metrics = self._audio_metrics(audio, result.sample_rate, max(count_words(strip_turbo_tags(spoken_chunk)), 1))
-            return result, audio, spoken_chunk, raw_metrics
-
-        async def evaluate_once(
-            audio: np.ndarray,
-            result: Any,
-            spoken_text: str,
-        ) -> ChunkQualityReport | None:
-            if not bool(options.get("quality_gate", True)):
-                return None
-            if fast_professional_qc:
-                # Pure waveform math; do not serialize Whisper/ECAPA between Turbo calls.
-                return self.quality.evaluate_acoustic(audio, result.sample_rate, spoken_text)
-            return await loop.run_in_executor(
-                self.executor,
-                lambda: self.quality.evaluate(
-                    audio,
-                    result.sample_rate,
-                    spoken_text,
-                    voice_path if bool(options.get("speaker_consistency", True)) else None,
-                    speaker_history,
-                ),
-            )
-
-        async def rescue_failed_chunk(
-            failed_chunk: str,
-            failed_segment: Any,
-            chunk_index: int,
-        ) -> tuple[Any, np.ndarray, str, dict[str, float], ChunkQualityReport] | None:
-            """Recover one repeatedly bad long-form chunk without aborting the job.
-
-            Chatterbox can occasionally fail the same 70–85 word span multiple times
-            even when surrounding chunks are clean. Retrying the *same* long span is
-            then low-value. The tested recovery path is to split only that span into
-            smaller clause-aware pieces, render them with the conservative retry
-            profile, quality-check each piece, and stitch the verified pieces back
-            together with a short natural breath. A second, smaller rescue tier is
-            available only for a piece that still hard-fails.
-            """
-
-            base_limit = max(24, min(36, int(options.get("chunk_words", 85) * 0.42)))
-
-            async def render_rescue_piece(
-                piece: str,
-                *,
-                piece_number: int,
-                depth: int = 0,
-            ) -> list[tuple[Any, np.ndarray, str, dict[str, float], ChunkQualityReport | None]] | None:
-                nonlocal quality_retries
-
-                candidates: list[tuple[Any, np.ndarray, str, dict[str, float], ChunkQualityReport | None]] = []
-                # Two attempts per rescue piece. The first is already materially
-                # different from the failed 85-word pass because the text span is
-                # smaller and the conservative profile is active.
-                for attempt in range(2):
-                    quality_retries += 1
-                    rescue_options = dict(options)
-                    rescue_options.update(
-                        MOTIVATIONAL_TURBO_RETRY_PROFILE
-                        if model_name == "chatterbox-turbo"
-                        else MOTIVATIONAL_ORIGINAL_RETRY_PROFILE
-                    )
-                    rescue_options["seed"] = (
-                        int(options.get("seed", 2025))
-                        + chunk_index * 104729
-                        + (depth + 1) * 1000003
-                        + piece_number * 1009
-                        + attempt * 9176
-                    )
-                    rescue_options["_quality_retry"] = True
-                    job["stage"] = f"Rescuing speech {chunk_index}/{len(chunks)}"
-                    candidate_result, candidate_audio, candidate_spoken, candidate_metrics = await render_once(
-                        piece, failed_segment, rescue_options
-                    )
-                    candidate_report = await evaluate_once(
-                        candidate_audio, candidate_result, candidate_spoken
-                    )
-                    candidates.append(
-                        (
-                            candidate_result,
-                            candidate_audio,
-                            candidate_spoken,
-                            candidate_metrics,
-                            candidate_report,
-                        )
-                    )
-                    if candidate_report is None or (
-                        candidate_report.passed and not candidate_report.retry_recommended
-                    ):
-                        return [candidates[-1]]
-
-                def candidate_rank(item: tuple[Any, np.ndarray, str, dict[str, float], ChunkQualityReport | None]) -> tuple[int, int, float]:
-                    report = item[4]
-                    if report is None:
-                        return (1, 1, 100.0)
-                    return (
-                        1 if report.passed else 0,
-                        0 if report.retry_recommended else 1,
-                        float(report.score),
-                    )
-
-                best = max(candidates, key=candidate_rank)
-                best_report = best[4]
-                if best_report is None or best_report.passed:
-                    # Soft ASR uncertainty is acceptable after a focused rescue.
-                    return [best]
-
-                # One final sentence/phrase-sized tier for a genuinely bad rescue
-                # piece. This is deliberately local: the rest of the long-form job
-                # keeps its normal 85-word performance profile.
-                piece_words = count_words(strip_turbo_tags(piece))
-                if depth < 1 and piece_words > 20:
-                    smaller_limit = max(12, min(20, piece_words // 2))
-                    smaller = [
-                        part for part in split_text(piece, smaller_limit, prefer_clauses=True)
-                        if part.strip()
-                    ]
-                    if len(smaller) > 1:
-                        recovered: list[tuple[Any, np.ndarray, str, dict[str, float], ChunkQualityReport | None]] = []
-                        for sub_number, sub_piece in enumerate(smaller, start=1):
-                            sub = await render_rescue_piece(
-                                sub_piece,
-                                piece_number=piece_number * 100 + sub_number,
-                                depth=depth + 1,
-                            )
-                            if not sub:
-                                return None
-                            recovered.extend(sub)
-                        return recovered
-                return None
-
-            first_parts = [
-                part for part in split_text(failed_chunk, base_limit, prefer_clauses=True)
-                if part.strip()
-            ]
-            if len(first_parts) <= 1:
-                first_parts = [
-                    part for part in split_text(failed_chunk, max(12, base_limit // 2), prefer_clauses=False)
-                    if part.strip()
-                ]
-            if len(first_parts) <= 1:
-                return None
-
-            verified_parts: list[tuple[Any, np.ndarray, str, dict[str, float], ChunkQualityReport | None]] = []
-            for piece_number, piece in enumerate(first_parts, start=1):
-                recovered = await render_rescue_piece(piece, piece_number=piece_number)
-                if not recovered:
-                    return None
-                verified_parts.extend(recovered)
-
-            if not verified_parts:
-                return None
-            sample_rate = int(verified_parts[0][0].sample_rate)
-            if any(int(item[0].sample_rate) != sample_rate for item in verified_parts):
-                return None
-
-            internal_pause = np.zeros(max(0, int(round(sample_rate * 0.16))), dtype=np.float32)
-            audio_parts: list[np.ndarray] = []
-            spoken_parts: list[str] = []
-            transcript_parts: list[str] = []
-            combined_words: list[dict[str, Any]] = []
-            warning_reasons: list[str] = []
-            wers: list[float] = []
-            similarities: list[float] = []
-            scores: list[float] = []
-            offset_seconds = 0.0
-            asr_available = False
-            speaker_available = False
-            has_soft_warning = False
-
-            for part_index, (part_result, part_audio, part_spoken, _part_metrics, part_report) in enumerate(verified_parts):
-                if part_index:
-                    audio_parts.append(internal_pause)
-                    offset_seconds += internal_pause.size / max(sample_rate, 1)
-                part_audio = np.asarray(part_audio, dtype=np.float32).reshape(-1)
-                audio_parts.append(part_audio)
-                spoken_parts.append(part_spoken.strip())
-                if part_report is not None:
-                    scores.append(float(part_report.score))
-                    asr_available = asr_available or part_report.asr_available
-                    speaker_available = speaker_available or part_report.speaker_check_available
-                    has_soft_warning = has_soft_warning or part_report.retry_recommended
-                    if part_report.wer is not None:
-                        wers.append(float(part_report.wer))
-                    if part_report.speaker_similarity is not None:
-                        similarities.append(float(part_report.speaker_similarity))
-                    if part_report.transcript:
-                        transcript_parts.append(part_report.transcript)
-                    for reason in part_report.reasons:
-                        if reason not in warning_reasons:
-                            warning_reasons.append(reason)
-                    for word in part_report.words:
-                        combined_words.append({
-                            "start": offset_seconds + float(word["start"]),
-                            "end": offset_seconds + float(word["end"]),
-                            "word": str(word["word"]),
-                        })
-                offset_seconds += part_audio.size / max(sample_rate, 1)
-
-            combined_audio = np.concatenate(audio_parts).astype(np.float32, copy=False)
-            combined_spoken = " ".join(part for part in spoken_parts if part).strip()
-            combined_metrics = self._audio_metrics(
-                combined_audio,
-                sample_rate,
-                max(count_words(strip_turbo_tags(combined_spoken)), 1),
-            )
-            combined_report = ChunkQualityReport(
-                passed=True,
-                score=float(np.mean(scores)) if scores else 100.0,
-                reasons=[f"recovered with {len(verified_parts)} smaller verified speech segments"] + warning_reasons,
-                transcript=" ".join(transcript_parts).strip(),
-                wer=float(np.mean(wers)) if wers else None,
-                speaker_similarity=float(np.median(similarities)) if similarities else None,
-                metrics={
-                    "wpm": 60.0 / max(combined_metrics["seconds_per_word"], 1e-6),
-                    "seconds_per_word": combined_metrics["seconds_per_word"],
-                },
-                words=combined_words,
-                asr_available=asr_available,
-                speaker_check_available=speaker_available,
-                retry_recommended=has_soft_warning,
-                hard_failure=False,
-            )
-            return (
-                verified_parts[0][0],
-                combined_audio,
-                combined_spoken,
-                combined_metrics,
-                combined_report,
-            )
-
-        def quality_retry_needed(report: ChunkQualityReport | None, emotion_tag: str | None) -> bool:
-            if report is None:
-                return False
-            if not report.passed or report.hard_failure:
-                return True
-            if not report.retry_recommended:
-                return False
-            if not emotion_tag:
-                return True
-            # Expressive speech can be harder for Whisper to transcribe literally. Do
-            # not let ASR-only uncertainty repeatedly regenerate an emotion beat and
-            # select a flatter take. Acoustic/speaker warnings still trigger retry.
-            advisory_prefixes = (
-                "high ASR mismatch", "moderate ASR mismatch", "ASR heard ",
-                "possible repeated or hallucinated words", "ASR strongly suspects",
-                "ASR suspects", "ASR content verification",
-            )
-            substantive = [
-                reason for reason in report.reasons
-                if not reason.startswith(advisory_prefixes)
-            ]
-            return bool(substantive)
 
         try:
             for index, chunk in enumerate(chunks, start=1):
-                segment = directed_segments[index - 1] if professional_longform else None
                 if job["cancel_requested"]:
                     job["status"] = "cancelled"
                     job["stage"] = "Cancelled"
                     break
 
-                model_chunk_for_count = strip_turbo_tags(chunk)
-                chunk_words = count_words(model_chunk_for_count)
+                chunk_words = count_words(chunk)
                 prior_seconds_per_word = (
                     (time.monotonic() - started_monotonic) / completed_words
-                    if completed_words > 0 else 0.36
+                    if completed_words > 0 else 0.30
                 )
-                expected_chunk = max(4.0, prior_seconds_per_word * max(chunk_words, 1))
+                expected_chunk = max(2.0, prior_seconds_per_word * max(chunk_words, 1))
                 job["stage"] = f"Generating speech {index}/{len(chunks)}"
                 ticker = asyncio.create_task(self._smooth_words(job, completed_words, chunk_words, expected_chunk))
+
+                # Official demo uses random seed when seed=0. Our adapter accepts an
+                # explicit seed, so vary it per call rather than forcing identical
+                # random state across every long-form chunk.
+                chunk_options = dict(options)
+                chunk_options["seed"] = (int(options["seed"]) + index * 1009) % 2_147_483_647 or 1
                 try:
-                    result, audio, spoken_chunk, raw_metrics = await render_once(chunk, segment, options)
+                    result = await loop.run_in_executor(
+                        self.executor,
+                        lambda c=chunk, o=chunk_options: self.engine.generate(
+                            c,
+                            model_name="chatterbox-turbo",
+                            reference_audio=voice_path,
+                            language="en",
+                            options=o,
+                        ),
+                    )
                 finally:
                     ticker.cancel()
                     try:
@@ -1177,154 +508,22 @@ class QueueManager:
                     except asyncio.CancelledError:
                         pass
 
-                # The old Turbo acoustic history remains as a cheap first-line drift
-                # detector. Production QC below is a quality advisor for both models; only objective acoustic corruption is a hard safety gate.
-                legacy_unstable = False
-                if model_name == "chatterbox-turbo" and professional_mode:
-                    legacy_unstable = self._turbo_chunk_is_unstable(
-                        raw_metrics, turbo_metric_history,
-                        intentional_emotion=contains_turbo_tag(chunk),
-                    )
-
-                report = None
-                if professional_mode and bool(options.get("quality_gate", True)):
-                    if fast_professional_qc:
-                        # Cheap objective safety check only. Heavy ASR/speaker models run once
-                        # after the full Turbo narration is assembled and mastered.
-                        report = self.quality.evaluate_acoustic(audio, result.sample_rate, spoken_chunk)
-                    else:
-                        job["stage"] = f"Quality checking {index}/{len(chunks)}"
-                        report = await loop.run_in_executor(
-                            self.executor,
-                            lambda: self.quality.evaluate(
-                                audio,
-                                result.sample_rate,
-                                spoken_chunk,
-                                voice_path if bool(options.get("speaker_consistency", True)) else None,
-                                speaker_history,
-                            ),
-                        )
-
-                segment_emotion = getattr(segment, "emotion_tag", None) if segment is not None else emotion_tag_for_text(chunk)
-                needs_retry = (
-                    legacy_unstable or (report is not None and report.hard_failure)
-                    if fast_professional_qc
-                    else legacy_unstable or quality_retry_needed(report, segment_emotion)
-                )
-                best_result, best_audio, best_spoken, best_metrics, best_report = result, audio, spoken_chunk, raw_metrics, report
-                if professional_mode and needs_retry:
-                    # Turbo Fast Professional retries an objectively broken chunk once.
-                    # Legacy/Original keeps the earlier two-attempt behavior.
-                    retry_attempts = 1 if fast_professional_qc else 2
-                    for attempt in range(1, retry_attempts + 1):
-                        quality_retries += 1
-                        retry_options = dict(options)
-                        retry_options.update(
-                            MOTIVATIONAL_TURBO_RETRY_PROFILE
-                            if model_name == "chatterbox-turbo"
-                            else MOTIVATIONAL_ORIGINAL_RETRY_PROFILE
-                        )
-                        retry_options["seed"] = int(options.get("seed", 2025)) + index * 104729 + attempt * 1009
-                        retry_options["_quality_retry"] = True
-                        # Original gets the same semantic direction, with conservative
-                        # retry controls applied before the tag-specific adjustment.
-                        job["stage"] = f"Retrying quality issue {index}/{len(chunks)}"
-                        retry_result, retry_audio, retry_spoken, retry_metrics = await render_once(chunk, segment, retry_options)
-                        retry_report = None
-                        if bool(options.get("quality_gate", True)):
-                            if fast_professional_qc:
-                                retry_report = self.quality.evaluate_acoustic(
-                                    retry_audio, retry_result.sample_rate, retry_spoken
-                                )
-                            else:
-                                retry_report = await loop.run_in_executor(
-                                    self.executor,
-                                    lambda: self.quality.evaluate(
-                                        retry_audio,
-                                        retry_result.sample_rate,
-                                        retry_spoken,
-                                        voice_path if bool(options.get("speaker_consistency", True)) else None,
-                                        speaker_history,
-                                    ),
-                                )
-                        retry_score = retry_report.score if retry_report is not None else (
-                            100.0 - 12.0 * self._chunk_distance_from_history(retry_metrics, turbo_metric_history)
-                        )
-                        best_score = best_report.score if best_report is not None else (
-                            100.0 - 12.0 * self._chunk_distance_from_history(best_metrics, turbo_metric_history)
-                        )
-                        if retry_score >= best_score:
-                            best_result, best_audio, best_spoken, best_metrics, best_report = (
-                                retry_result, retry_audio, retry_spoken, retry_metrics, retry_report
-                            )
-                        if (
-                            best_report is not None
-                            and best_report.passed
-                            and not best_report.retry_recommended
-                        ):
-                            break
-
-                result, audio, spoken_chunk, raw_metrics, report = (
-                    best_result, best_audio, best_spoken, best_metrics, best_report
-                )
-                if professional_mode and report is not None and not report.passed:
-                    rescue = await rescue_failed_chunk(chunk, segment, index)
-                    if rescue is not None:
-                        result, audio, spoken_chunk, raw_metrics, report = rescue
-                # Hard failures still stop the job. ASR-only uncertainty is allowed
-                # through after focused retries when acoustic timing / coverage do not
-                # corroborate missing or hallucinated speech. This prevents Whisper
-                # false positives from aborting long-form narration.
-                if professional_mode and report is not None and not report.passed:
-                    quality_reports.append(report)
-                    job["quality_summary"] = summarize_quality(quality_reports, quality_retries)
-                    if output_file is not None:
-                        output_file.close()
-                        output_file = None
-                    output_path.unlink(missing_ok=True)
-                    reason_text = "; ".join(report.reasons[:3]) or "quality verification failed"
-                    raise RuntimeError(
-                        f"Production Quality Gate rejected chunk {index}/{len(chunks)} after retries: {reason_text}. "
-                        "The waveform still showed an objective audio failure after the focused retry."
-                    )
-                if model_name == "chatterbox-turbo":
-                    turbo_metric_history.append(raw_metrics)
-                if report is not None:
-                    quality_reports.append(report)
-                    if report.speaker_similarity is not None:
-                        speaker_history.append(report.speaker_similarity)
+                audio = result.waveform.squeeze().numpy().astype(np.float32, copy=False)
+                if audio.size == 0 or not np.isfinite(audio).all():
+                    raise RuntimeError(f"Chatterbox Turbo returned invalid audio for chunk {index}/{len(chunks)}.")
 
                 if output_file is None:
                     output_file = sf.SoundFile(
                         output_path, mode="w", samplerate=result.sample_rate,
                         channels=1, subtype="PCM_16",
                     )
-
-                # Keep raw accepted ASR timing for captions. The final caption text
-                # is aligned against the creator-facing script, not the hidden
-                # pronunciation copy, so terms such as A1C and 120/80 remain readable.
-                audio_duration = audio.size / max(result.sample_rate, 1)
-                if report is not None and report.words:
-                    for word in report.words:
-                        caption_asr_words.append({
-                            "start": written_seconds + float(word["start"]),
-                            "end": written_seconds + float(word["end"]),
-                            "word": str(word["word"]),
-                        })
-                else:
-                    caption_asr_complete = False
+                elif int(output_file.samplerate) != int(result.sample_rate):
+                    raise RuntimeError("Chatterbox Turbo changed sample rate during one job.")
 
                 output_file.write(audio)
-                written_seconds += audio_duration
                 if index < len(chunks):
-                    if professional_longform:
-                        next_segment = directed_segments[index]
-                        pause_ms = next_segment.pause_before_ms
-                    else:
-                        pause_ms = int(options.get("inter_chunk_pause_ms", 80))
-                    pause_seconds = max(0.0, float(pause_ms) / 1000.0)
-                    output_file.write(np.zeros(int(result.sample_rate * pause_seconds), dtype=np.float32))
-                    written_seconds += pause_seconds
+                    pause = int(result.sample_rate * TURBO_INTER_CHUNK_PAUSE_MS / 1000.0)
+                    output_file.write(np.zeros(pause, dtype=np.float32))
 
                 completed_words += chunk_words
                 job["completed_words"] = min(completed_words, job["total_words"])
@@ -1336,7 +535,7 @@ class QueueManager:
                 self._update_percent(job)
                 self._persist(force=True)
 
-            job["stage"] = "Finalising audio"
+            job["stage"] = "Finalising audio volume"
             job["percent"] = 98.0
             job["remaining_percent"] = 2.0
             self._persist(force=True)
@@ -1352,87 +551,7 @@ class QueueManager:
             self._signal(job["id"])
             return
 
-        speed_factor = float(options.get("speed_factor", 1.0))
-        if not professional_longform and not professional_mode and abs(speed_factor - 1.0) > 0.001:
-            job["stage"] = "Applying natural pacing"
-            await asyncio.to_thread(self._apply_final_tempo, output_path, speed_factor)
-
-        if professional_mode:
-            job["stage"] = "Mastering professional speech"
-            job["percent"] = 99.0
-            job["remaining_percent"] = 1.0
-            self._persist(force=True)
-            if model_name == "chatterbox-turbo":
-                def _master_turbo() -> dict[str, Any]:
-                    try:
-                        return master_professional_voice(output_path, preserve_dynamics=True)
-                    except TypeError as error:
-                        # Keep test/custom monkeypatch compatibility with the old one-arg hook.
-                        if "preserve_dynamics" not in str(error):
-                            raise
-                        return master_professional_voice(output_path)
-                job["mastering_profile"] = await asyncio.to_thread(_master_turbo)
-            else:
-                # Original path stays byte-for-byte compatible with the v1.5.4 call shape.
-                job["mastering_profile"] = await asyncio.to_thread(master_professional_voice, output_path)
-            job["quality_summary"] = summarize_quality(quality_reports, quality_retries)
-            if fast_professional_qc and bool(options.get("quality_gate", True)):
-                job["stage"] = "Running one fast final quality check"
-                self._persist(force=True)
-                final_verification = await asyncio.to_thread(
-                    self.quality.evaluate_final_file,
-                    output_path,
-                    job.get("generation_text") or job.get("text") or "",
-                    voice_path,
-                    bool(options.get("speaker_consistency", True)),
-                )
-                final_summary = final_verification.get("summary") or {}
-                combined = dict(job["quality_summary"] or {})
-                combined.update({
-                    "average_score": final_summary.get("average_score", combined.get("average_score")),
-                    "average_wer": final_summary.get("average_wer"),
-                    "minimum_speaker_similarity": final_summary.get("minimum_speaker_similarity"),
-                    "asr_verified": bool(final_summary.get("asr_verified", False)),
-                    "speaker_verified": bool(final_summary.get("speaker_verified", False)),
-                    "mode": final_summary.get("mode", "fast-final-pass"),
-                })
-                combined["warnings"] = list(combined.get("warnings") or []) + list(final_summary.get("warnings") or [])
-                job["quality_summary"] = combined
-                caption_asr_words = list(final_verification.get("words") or [])
-                caption_asr_complete = bool(caption_asr_words)
-
-            if model_name == "chatterbox-turbo":
-                job["stage"] = "Checking Turbo prosody and avatar engagement"
-                job["prosody_summary"] = await asyncio.to_thread(
-                    analyze_prosody_quality,
-                    output_path,
-                    job.get("emotion_summary"),
-                    avatar_minutes=5.0,
-                )
-
-            if bool(options.get("platform_assets", True)):
-                stem = Path(output_filename).stem
-                video_filename = f"{stem}.video48.wav"
-                srt_filename = f"{stem}.captions.srt"
-                vtt_filename = f"{stem}.captions.vtt"
-                video_path = self.storage.output_path(video_filename)
-                srt_path = self.storage.output_path(srt_filename)
-                vtt_path = self.storage.output_path(vtt_filename)
-                job["stage"] = "Creating video master and captions"
-                await asyncio.to_thread(create_video_master_48k_stereo, output_path, video_path)
-                caption_source_text = strip_turbo_tags(job.get("text") or "").strip()
-                if caption_asr_complete and caption_asr_words:
-                    caption_words = aligned_expected_words(caption_source_text, caption_asr_words, written_seconds)
-                else:
-                    caption_words = fallback_words(caption_source_text, 0.0, written_seconds)
-                await asyncio.to_thread(write_caption_files, caption_words, srt_path, vtt_path)
-                job["video_master_filename"] = video_filename
-                job["srt_filename"] = srt_filename
-                job["vtt_filename"] = vtt_filename
-        elif model_name == "chatterbox-turbo" and not standard_turbo:
-            job["stage"] = "Normalising Turbo loudness"
-            await asyncio.to_thread(self._normalize_turbo_loudness, output_path)
-
+        job["mastering_profile"] = await asyncio.to_thread(self._normalise_loudness, output_path)
         info = sf.info(output_path)
         job["status"] = "completed"
         job["stage"] = "Completed"
@@ -1446,4 +565,3 @@ class QueueManager:
         job["completed_at"] = time.time()
         self._persist(force=True)
         self._signal(job["id"])
-

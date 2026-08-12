@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f7f9fc">
   <title>SoftMeta Chatterbox TTS Server</title>
-  <link rel="stylesheet" href="/static/styles.css?v=1.5.10">
+  <link rel="stylesheet" href="/static/styles.css?v=1.6.0">
 </head>
 <body>
   <header class="app-header">
@@ -16,7 +16,7 @@
           <span class="brand-kicker">SoftMeta Audio Studio</span>
           <div class="brand-title-row">
             <h1>Chatterbox TTS Server</h1>
-            <span id="model-badge" class="model-badge">Original</span>
+            <span id="model-badge" class="model-badge">Turbo</span>
           </div>
         </div>
       </div>
@@ -25,6 +25,7 @@
           <a class="api-link" href="/docs" target="_blank" rel="noopener">API Docs</a>
           <a class="api-sub-link" href="/docs" target="_blank" rel="noopener">Chatterbox TTS API</a>
         </div>
+        <button id="disconnect-colab" class="button button-danger-soft hidden" type="button" title="Disconnect and release this Google Colab runtime">Disconnect Colab</button>
         <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle light and dark theme">
           <span class="theme-icon">☀</span>
         </button>
@@ -38,7 +39,7 @@
         <div class="studio-heading-copy">
           <span class="section-eyebrow">Speech workspace</span>
           <h2>Generate Speech</h2>
-          <p>Create natural speech, clone a permitted voice, and queue up to five audio jobs.</p>
+          <p>Fresh Chatterbox Turbo generation with voice cloning and up to five queued audio jobs.</p>
         </div>
         <div class="studio-actions">
           <button id="generate-all" class="button button-primary" type="button">Generate All</button>
@@ -47,14 +48,14 @@
         </div>
       </div>
 
-      <section class="active-model-panel" aria-labelledby="active-model-label">
-        <label id="active-model-label" for="active-model">Active Model</label>
-        <select id="active-model" aria-label="Active model"></select>
+      <section class="active-model-panel compact-model-panel" aria-labelledby="active-model-label">
+        <label id="active-model-label" for="active-model">Chatterbox Turbo</label>
+        <select id="active-model" aria-label="Active model" class="visually-hidden"></select>
         <div id="model-state" class="model-state" data-state="loading">
           <span id="model-dot" class="model-dot"></span>
           <span id="model-status">Checking model...</span>
         </div>
-        <button id="load-model" class="button button-model" type="button">Load Model</button>
+        <button id="load-model" class="button button-model visually-hidden" type="button">Load Model</button>
       </section>
 
       <nav id="audio-tabs" class="audio-tabs" aria-label="Audio workspaces"></nav>
@@ -64,15 +65,15 @@
     <section id="tips-card" class="tips-card">
       <h2>Tips &amp; Tricks</h2>
       <ul>
-        <li>For 8–12 minute narration, keep <strong>Motivational Speech</strong> and <strong>Split text into chunks</strong> enabled. The same Professional Speech Pipeline works with Turbo or Original.</li>
+        <li>Generation uses fresh Chatterbox Turbo defaults. Long scripts are automatically split into model-safe sentence chunks.</li>
         <li>Use a clean 10–20 second single-speaker reference for voice cloning.</li>
-        <li>For a natural American delivery, use an American-accent reference recording.</li>
+        <li>The only post-processing is a final loudness boost so the downloaded WAV stays easy to hear.</li>
       </ul>
     </section>
   </main>
 
   <footer class="app-footer">
-    <span><a href="https://github.com/soft-meta/chatterbox-v2" target="_blank" rel="noopener">SoftMeta Chatterbox TTS</a> Server v1.5.10</span>
+    <span><a href="https://github.com/soft-meta/chatterbox-v2" target="_blank" rel="noopener">SoftMeta Chatterbox TTS</a> Server v1.6.0</span>
     <span>Powered by the official open-source Chatterbox engine</span>
   </footer>
 
@@ -113,20 +114,20 @@
         <div class="label-row">
           <div>
             <label>Text to synthesise</label>
-            <p>Paste your script. Generate Audio uses the full professional Turbo pipeline. Auto Emotion is optional and stays off until you enable it.</p>
+            <p>Paste your script exactly as you want it spoken. No Auto Emotion, rewriting, QC retries, pacing or professional speech processing is applied.</p>
           </div>
           <span data-role="word-count">0 words</span>
         </div>
         <textarea data-field="text" rows="13" placeholder="Paste your script here..."></textarea>
-        <div data-role="emotion-status" class="emotion-status hidden" aria-live="polite">
+        <div data-role="emotion-status" class="emotion-status hidden" style="display:none" aria-live="polite">
           <span class="emotion-status-badge">Auto Emotion Plan</span>
           <span data-role="emotion-summary">Waiting for script...</span>
         </div>
-        <details data-role="advanced-tag-details" class="advanced-tag-details hidden">
+        <details data-role="advanced-tag-details" class="advanced-tag-details hidden" style="display:none">
           <summary>View Auto Emotion Turbo event tags</summary>
           <pre data-role="advanced-tag-preview"></pre>
         </details>
-        <div class="turbo-event-tools" data-role="turbo-event-tools">
+        <div class="turbo-event-tools hidden" data-role="turbo-event-tools" style="display:none">
           <span>Manual Turbo events</span>
           <button type="button" data-event-tag="[chuckle]">[chuckle]</button>
           <button type="button" data-event-tag="[laugh]">[laugh]</button>
@@ -140,15 +141,15 @@
           <span class="speaker-icon">◖</span>
           <span>Generate Audio</span>
         </button>
-        <button data-action="toggle-auto-emotion" class="auto-emotion-toggle" type="button" aria-pressed="false" title="Auto Emotion is off">
+        <button data-action="toggle-auto-emotion" class="auto-emotion-toggle hidden" style="display:none" type="button" aria-pressed="false" title="Auto Emotion is off">
           <span class="auto-emotion-label">Auto Emotion</span>
           <span class="auto-emotion-switch" aria-hidden="true"><span class="auto-emotion-indicator"></span></span>
         </button>
-        <label class="inline-check">
+        <label class="inline-check hidden" style="display:none">
           <input data-field="split_text" type="checkbox">
           <span>Split text into chunks</span>
         </label>
-        <div class="chunk-control">
+        <div class="chunk-control hidden" style="display:none">
           <span>Chunk size</span>
           <input data-field="chunk_words" type="range" min="25" max="250" step="5">
           <strong data-role="chunk-value">90</strong>
@@ -182,13 +183,13 @@
 
       </section>
 
-      <section class="preset-section">
+      <section class="preset-section hidden" style="display:none">
         <div class="section-label">Load Example Preset</div>
         <div data-role="preset-buttons" class="preset-buttons"></div>
         <select data-field="preset" class="visually-hidden" aria-label="Generation preset"></select>
       </section>
 
-      <details class="parameters-panel" open>
+      <details class="parameters-panel hidden" style="display:none">
         <summary>Generation Parameters</summary>
         <div class="parameter-grid">
           <label class="slider-field">
@@ -254,9 +255,9 @@
           </div>
           <div class="generated-downloads">
             <a data-role="download-original" class="button button-secondary" download>Voice WAV</a>
-            <a data-role="download-video-master" class="button button-secondary hidden" download>Video Master 48k</a>
-            <a data-role="download-srt" class="button button-secondary hidden" download>SRT</a>
-            <a data-role="download-vtt" class="button button-secondary hidden" download>VTT</a>
+            <a data-role="download-video-master" class="button button-secondary hidden" style="display:none" download>Video Master 48k</a>
+            <a data-role="download-srt" class="button button-secondary hidden" style="display:none" download>SRT</a>
+            <a data-role="download-vtt" class="button button-secondary hidden" style="display:none" download>VTT</a>
           </div>
         </div>
 
@@ -287,7 +288,7 @@
         </div>
         <div data-role="generation-meta" class="generation-meta"></div>
 
-        <details class="performance-feedback">
+        <details class="performance-feedback hidden" style="display:none">
           <summary>Optional: save platform performance feedback</summary>
           <div class="performance-grid">
             <label class="field"><span>Platform</span><select data-role="feedback-platform"><option value="youtube">YouTube</option><option value="facebook">Facebook</option><option value="instagram">Instagram</option></select></label>
@@ -329,6 +330,6 @@
 
 
 
-  <script src="/static/app.js?v=1.5.10" defer></script>
+  <script src="/static/app.js?v=1.6.0" defer></script>
 </body>
 </html>

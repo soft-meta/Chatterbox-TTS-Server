@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
+import urllib.request
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -16,13 +18,11 @@ from fastapi.staticfiles import StaticFiles
 
 from config import ROOT, load_config
 from engine import EngineService
-from emotion_director import analyze_serious_senior_advisor, analyze_turbo_avatar_performance
 from reference_quality import analyze_reference_voice
 from models import (
     AudioJobCreate,
     CutRequest,
     GenerateAllRequest,
-    EmotionAnalyzeRequest,
     ModelLoadRequest,
     OpenAITTSRequest,
     RemoveJobsRequest,
@@ -33,7 +33,7 @@ from storage import AUDIO_EXTENSIONS, Storage
 from utils import safe_filename
 
 APP_NAME = "SoftMeta Chatterbox TTS Server"
-APP_VERSION = "1.5.10"
+APP_VERSION = "1.6.0"
 logger = logging.getLogger("softmeta.chatterbox")
 
 config = load_config()
@@ -44,101 +44,34 @@ model_load_task: asyncio.Task | None = None
 
 MODELS = [
     {
-        "id": "chatterbox",
-        "name": "Chatterbox Original (English)",
-        "badge": "Original",
-        "description": "Original English engine retained unchanged for comparison. Turbo is the current production default.",
-    },
-    {
         "id": "chatterbox-turbo",
         "name": "Chatterbox Turbo (English)",
         "badge": "Turbo",
-        "description": "Production default. Standard Audio provides a clean Turbo baseline; Advanced Audio adds audible Turbo events and the professional narration pipeline.",
-    },
-    {
-        "id": "chatterbox-nano",
-        "name": "Chatterbox Nano (English)",
-        "badge": "Nano",
-        "description": "Compact English model when supported by the installed engine.",
-    },
-    {
-        "id": "chatterbox-multilingual",
-        "name": "Chatterbox Multilingual",
-        "badge": "Multilingual",
-        "description": "Multilingual generation when supported by the installed engine.",
+        "description": "Fresh Chatterbox Turbo defaults with long-text safe splitting and loudness-only final output.",
     },
 ]
 
 PRESETS = [
     {
-        "name": "Motivational Speech",
-        "description": "Advanced senior-advisor narration profile. Turbo uses audible human-performance events plus pronunciation, pacing, QC, mastering and captions; Original remains on its existing path.",
-        "language": "en",
-        "temperature": 0.72,
-        "exaggeration": 0.58,
-        "cfg_weight": 0.35,
-        "repetition_penalty": 1.2,
-        "min_p": 0.05,
-        "top_p": 1.0,
-        "top_k": 1000,
-        "speed_factor": 1.0,
-        "seed": 2025,
-        "split_text": True,
-        "chunk_words": 85,
-        "output_format": "wav",
-        "senior_pace_profile": "70s",
-        "quality_gate": True,
-        "speaker_consistency": True,
-        "platform_assets": True,
-        "turbo_overrides": {
-            # Turbo does not support CFG/exaggeration/min_p. These values are
-            # deliberately neutral so the model does not emit ignored-control warnings.
-            # The supported sampling controls plus a pitch-preserving final tempo pass
-            # produce a calm senior-advisor / tutorial delivery.
-            "temperature": 0.60,
-            "exaggeration": 0.0,
-            "cfg_weight": 0.0,
-            "repetition_penalty": 1.18,
-            "min_p": 0.0,
-            "top_p": 0.85,
-            "top_k": 600,
-            "speed_factor": 1.0,
-            "chunk_words": 85,
-        },
-    },
-    {
-        "name": "Natural Conversation",
-        "description": "Balanced, calm and natural delivery for general narration.",
+        "name": "Chatterbox Turbo Default",
+        "description": "Official Turbo sampling defaults. No emotion, QC, pacing, retries, pronunciation rewrite or professional processing.",
         "language": "en",
         "temperature": 0.8,
-        "exaggeration": 0.5,
-        "cfg_weight": 0.5,
+        "exaggeration": 0.0,
+        "cfg_weight": 0.0,
         "repetition_penalty": 1.2,
-        "min_p": 0.05,
-        "top_p": 1.0,
+        "min_p": 0.0,
+        "top_p": 0.95,
         "top_k": 1000,
         "speed_factor": 1.0,
-        "seed": 2025,
+        "seed": 0,
         "split_text": True,
-        "chunk_words": 90,
+        "chunk_words": 50,
         "output_format": "wav",
-    },
-    {
-        "name": "Calm Storytelling",
-        "description": "Measured delivery with gentle emotion for long-form stories.",
-        "language": "en",
-        "temperature": 0.75,
-        "exaggeration": 0.45,
-        "cfg_weight": 0.45,
-        "repetition_penalty": 1.2,
-        "min_p": 0.05,
-        "top_p": 1.0,
-        "top_k": 1000,
-        "speed_factor": 0.96,
-        "seed": 2025,
-        "split_text": True,
-        "chunk_words": 85,
-        "output_format": "wav",
+        "senior_pace_profile": "70s",
+        "quality_gate": False,
+        "speaker_consistency": False,
+        "platform_assets": False,
     },
 ]
 
@@ -225,26 +158,12 @@ def initial_data() -> dict[str, Any]:
             "max_audio_tabs": 5,
             "max_voice_upload_mb": 100,
         },
-        "production_quality": {
-            "models": ["chatterbox", "chatterbox-turbo"],
-            "asr_model": "small.en",
-            "speaker_verifier": "speechbrain/spkrec-ecapa-voxceleb",
-            "video_master_sample_rate": 48000,
+        "runtime": {
+            "colab_disconnect_supported": bool(os.getenv("TBE_RUNTIME_ADDR")),
         },
     }
 
 
-
-
-@app.post("/api/emotion/analyze")
-def analyze_emotion(request: EmotionAnalyzeRequest) -> dict[str, Any]:
-    """Preview the model-specific emotion plan used for generation."""
-    if request.model == "chatterbox-turbo":
-        analysis = analyze_turbo_avatar_performance(request.text)
-    else:
-        # Original stays on the existing v1.5.4 conservative planner.
-        analysis = analyze_serious_senior_advisor(request.text)
-    return analysis.public_summary(include_text=True)
 
 
 @app.get("/api/model-info")
@@ -255,6 +174,8 @@ def model_info() -> dict[str, Any]:
 @app.post("/api/model/load")
 async def load_model(request: ModelLoadRequest) -> dict[str, Any]:
     global model_load_task
+    if request.model != "chatterbox-turbo":
+        raise HTTPException(400, "This fresh build supports Chatterbox Turbo only.")
     if queue.has_active_jobs():
         raise HTTPException(409, "Wait for audio generation to finish before changing models.")
     if model_load_task and not model_load_task.done():
@@ -580,6 +501,43 @@ async def cut_audio(job_id: str, request: CutRequest) -> dict[str, Any]:
 
 
 
+def _request_colab_unassign() -> None:
+    """Ask the current hosted Colab runtime to unassign itself.
+
+    This mirrors google.colab.runtime.unassign() without importing google.colab
+    inside the isolated sm311 server environment. TBE_RUNTIME_ADDR is inherited
+    from the Colab parent process when the server starts.
+    """
+    runtime_addr = os.getenv("TBE_RUNTIME_ADDR", "").strip()
+    if not runtime_addr:
+        raise RuntimeError("Colab runtime management is unavailable in this environment.")
+    request = urllib.request.Request(f"http://{runtime_addr}/unassign", method="POST")
+    with urllib.request.urlopen(request, timeout=8) as response:
+        if int(getattr(response, "status", 0)) != 200:
+            raise RuntimeError(f"Colab runtime unassign returned HTTP {getattr(response, 'status', 'unknown')}.")
+
+
+@app.post("/api/runtime/disconnect")
+async def disconnect_colab_runtime() -> dict[str, Any]:
+    if queue.has_active_jobs():
+        raise HTTPException(409, "Wait for active audio generation to finish before disconnecting Colab.")
+    if not os.getenv("TBE_RUNTIME_ADDR"):
+        raise HTTPException(501, "This server is not running inside a managed Google Colab runtime.")
+
+    async def delayed_disconnect() -> None:
+        await asyncio.sleep(0.7)
+        try:
+            await asyncio.to_thread(_request_colab_unassign)
+        except Exception:
+            logger.exception("Colab runtime disconnect request failed")
+
+    asyncio.create_task(delayed_disconnect())
+    return {
+        "ok": True,
+        "message": "Colab disconnect requested. Reconnect later from the Colab page's Connect button.",
+    }
+
+
 @app.post("/tts")
 async def tts(request: AudioJobCreate) -> FileResponse:
     job = await queue.create(request)
@@ -601,7 +559,7 @@ async def openai_speech(request: OpenAITTSRequest) -> FileResponse:
         voice_mode=voice_mode,
         voice_filename=request.voice,
         options={
-            "model": request.model if request.model in valid_models else "chatterbox",
+            "model": request.model if request.model in valid_models else "chatterbox-turbo",
             "speed_factor": request.speed,
         },
     )

@@ -1,32 +1,38 @@
 # SoftMeta Chatterbox TTS Server
 
-## v1.5.10 Short-Tail QC Safety
+## v1.6.0 Fresh Turbo Reset
 
-Chatterbox Turbo remains the production default. The single **Generate Audio** workflow keeps the professional speech pipeline from v1.5.8, including pronunciation preparation, Senior Clear Speech, optional native Auto Emotion, natural pause shaping, age-aware pacing, dynamics-preserving mastering, Prosody reporting, reliable downloads, 48 kHz video master and SRT/VTT captions.
+v1.6.0 removes the experimental professional narration stack and restores a direct Chatterbox Turbo workflow for long-form voice generation.
 
-### Faster professional generation
+### Generate Audio
 
-The expensive Production QC architecture has been redesigned for Turbo long-form generation. Every generated chunk still receives an objective acoustic safety check, but Whisper ASR and SpeechBrain speaker verification no longer run between every TTS model call. The complete mastered narration receives one final ASR verification and one representative speaker-consistency check instead.
+Every Generate Audio job uses Chatterbox Turbo with the Turbo sampling defaults used by the upstream demo:
 
-When faster-whisper supports its batched pipeline, final ASR uses a single batched pass with beam size 1 and word timestamps. If batched inference is unavailable, the server falls back to one ordinary final-file transcription rather than returning to per-chunk ASR.
+- temperature `0.8`
+- top-p `0.95`
+- top-k `1000`
+- repetition penalty `1.2`
+- min-p `0.0`
+- random seed per job/chunk
 
-Soft ASR disagreements no longer cause repeated Turbo re-generation. An objectively broken chunk may receive one focused retry; the existing smaller-chunk rescue remains available only for a genuine hard acoustic failure.
+The server does not run Auto Emotion, pronunciation rewriting, Senior Clear Speech, age pacing, tempo changes, Production QC, Whisper ASR, speaker verification, retry/rescue generation, Prosody processing, EQ, compression, de-essing, caption generation or video-master generation.
 
-Turbo-native event sentences are now packed with nearby narration instead of forcing one tiny model call for every `[chuckle]`, `[laugh]`, `[sigh]`, or `[gasp]`. Event-bearing spans remain moderately local while reducing long-form model-call overhead.
+### Long scripts
 
+Turbo is a short-input model, so long scripts are divided only at sentence-safe boundaries into calls of at most 300 characters. A text-integrity check runs before inference. If the splitter ever changes the lexical script content, the job stops before spending GPU time.
 
-### Short-tail false-failure fix
+Each safe chunk is sent to Turbo exactly once. There is no quality-warning retry loop.
 
-Fast Professional QC no longer treats speaking rate by itself as proof of corrupt audio. Short final chunks and Turbo event spans can legitimately contain longer pauses or non-verbal events, making words-per-minute unreliable. Only objective waveform failures such as empty audio, invalid samples, unusable level or mostly-silent audio can hard-stop a Turbo job. Speaking-rate outliers remain advisory, and short spans are exempt from normal rate-drift retries unless timing is truly absurd.
+### Output volume
 
-### Optional Auto Emotion
+The only final post-processing is a two-pass linear FFmpeg loudness normalization targeting approximately `-12.5 LUFS` with a `-0.8 dB` true-peak ceiling. This keeps the stronger output level from recent builds without applying the former professional processing chain.
 
-Auto Emotion is **OFF by default**. When enabled, only four audible Turbo-native events are inserted when the wording genuinely supports them: `[chuckle]`, `[laugh]`, `[sigh]`, and `[gasp]`. Neutral text receives no fabricated event.
+### Colab runtime
 
-### Queue and downloads
+The v1.6.0 Colab notebook starts the server under a keep-alive supervisor. While the Colab runtime is alive, an unexpected child-server exit is restarted automatically. The Audio Studio also exposes a manual **Disconnect Colab** control when running inside Colab. After disconnecting the runtime, reconnect from the Colab page.
 
-Finished Queue Monitor cards can be dismissed without deleting their generated audio. The minimized progress card remains draggable and shows live completion progress. Final WAVs, cuts and platform assets use server-enforced attachment downloads for reliable delivery through the Colab proxy.
+Google Colab can still end a runtime because of its own session or resource policies; the server does not contain any job-completion auto-disconnect behavior.
 
-### Original model
+### Preserved workflow
 
-Chatterbox Original remains selectable and keeps its previous generation/QC behavior. The v1.5.10 fast final-pass architecture is enabled only for the advanced Chatterbox Turbo workflow.
+Voice cloning/predefined voices, Audio 1–5 queueing, Queue Monitor, waveform preview/cutting, reliable attachment downloads, draggable minimized progress, Remove All and individual Queue Monitor history dismissal remain available.

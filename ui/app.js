@@ -2,7 +2,7 @@
   'use strict';
 
   const MAX_TABS = 5;
-  const STORAGE_KEY = 'softMetaChatterboxTabsV10';
+  const STORAGE_KEY = 'softMetaChatterboxTabsV11';
   const FLOATING_POSITION_KEY = 'softMetaChatterboxFloatingProgressV1';
   const THEME_KEY = 'softMetaChatterboxTheme';
   const $ = (selector, root = document) => root.querySelector(selector);
@@ -35,26 +35,26 @@
       emotion_summary: null,
       advanced_tagged_text: '',
       auto_emotion: false,
-      preset: defaults.preset || 'Motivational Speech',
+      preset: defaults.preset || 'Chatterbox Turbo Default',
       language: defaults.language || 'en',
       voice_mode: 'clone',
       voice_filename: '',
       temperature: defaults.temperature ?? 0.8,
-      exaggeration: defaults.exaggeration ?? 0.65,
-      cfg_weight: defaults.cfg_weight ?? 0.35,
+      exaggeration: 0.0,
+      cfg_weight: 0.0,
       repetition_penalty: defaults.repetition_penalty ?? 1.2,
-      min_p: defaults.min_p ?? 0.05,
-      top_p: defaults.top_p ?? 1.0,
+      min_p: 0.0,
+      top_p: 0.95,
       top_k: defaults.top_k ?? 1000,
       speed_factor: defaults.speed_factor ?? 1.0,
-      seed: defaults.seed ?? 2025,
+      seed: 0,
       split_text: defaults.split_text ?? true,
-      chunk_words: defaults.chunk_words ?? 85,
+      chunk_words: 50,
       output_format: defaults.output_format || 'wav',
       senior_pace_profile: defaults.senior_pace_profile || '70s',
-      quality_gate: defaults.quality_gate ?? true,
-      speaker_consistency: defaults.speaker_consistency ?? true,
-      platform_assets: defaults.platform_assets ?? true,
+      quality_gate: false,
+      speaker_consistency: false,
+      platform_assets: false,
       cut_start: '0:00',
       cut_end: '',
       job_id: null,
@@ -115,173 +115,47 @@
     return (stripVisibleEmotionTags(text).match(/\b[\w’'-]+\b/gu) || []).length;
   }
 
-  function shouldAutoEmotion(tab) {
-    const model = $('#active-model')?.value || state.initial?.active_model || '';
-    return model === 'chatterbox-turbo'
-      && tab?.auto_emotion === true
-      && tab?.preset === 'Motivational Speech'
-      && countWords(tab?.text || '') >= 4;
+  function shouldAutoEmotion() {
+    return false;
   }
 
-  function emotionSummaryText(summary) {
-    if (!summary) return 'Reading the full script and selecting natural expression...';
-    const labels = Object.entries(summary.labels || {})
-      .filter(([, count]) => Number(count) > 0)
-      .map(([label, count]) => `${count} ${label}`);
-    const headingText = summary.protected_headings
-      ? `${summary.protected_headings} heading${summary.protected_headings === 1 ? '' : 's'} protected`
-      : 'no headings detected';
-    if (!summary.applied_count) {
-      return `0 audible events planned • natural narration kept • ${headingText}`;
-    }
-    const details = labels.length ? ` • ${labels.join(' • ')}` : '';
-    const avatarCount = Number(summary.avatar_applied_count || 0);
-    const avatarTarget = Number(summary.avatar_target_count || 0);
-    const avatarText = avatarCount ? ` • ${avatarCount}${avatarTarget ? `/${avatarTarget}` : ''} in first 5-min avatar zone` : '';
-    const emphasis = Number(summary.key_emphasis_count || 0) > 0 ? ` • ${summary.key_emphasis_count} key emphasis` : '';
-    const resets = Number(summary.retention_reset_count || 0) > 0 ? ` • ${summary.retention_reset_count} retention reset${summary.retention_reset_count === 1 ? '' : 's'}` : '';
-    const confidence = Number(summary.high_confidence_count || 0) + Number(summary.medium_confidence_count || 0);
-    const confidenceText = confidence ? ` • ${summary.high_confidence_count || 0} high-confidence` : '';
-    return `${summary.applied_count} audible event${summary.applied_count === 1 ? '' : 's'} planned${details}${avatarText}${confidenceText} • ${headingText} • used by Auto Emotion during Generate Audio`;
+  function emotionSummaryText() {
+    return '';
   }
 
-  function renderEmotionStatus(tab, message = null) {
+  function renderEmotionStatus(tab) {
     const box = tab?.panel?.querySelector('[data-role="emotion-status"]');
-    const badge = tab?.panel?.querySelector('.emotion-status-badge');
-    const summary = tab?.panel?.querySelector('[data-role="emotion-summary"]');
-    if (!box || !summary) return;
-    if (!shouldAutoEmotion(tab)) {
-      box.classList.add('hidden');
-      return;
-    }
-    box.classList.remove('hidden');
-    if (badge) badge.textContent = tab.emotion_summary ? 'Auto Emotion Ready' : 'Auto Emotion Plan';
-    summary.textContent = message || emotionSummaryText(tab.emotion_summary);
+    if (box) box.classList.add('hidden');
   }
 
-  function applyVisibleEmotionResult(tab, result, snapshot) {
-    const textarea = tab?.panel ? field(tab.panel, 'text') : null;
-    if (!textarea || tab.text !== snapshot || textarea.value !== snapshot) return false;
-    if (typeof result?.tagged_text !== 'string' || !result.tagged_text.trim()) return false;
-    // Do not mutate the creator's script. Standard Turbo must receive the untouched
-    // baseline text. The Advanced button uses the server-side event plan instead.
-    tab.advanced_tagged_text = result.tagged_text;
-    const details = tab.panel.querySelector('[data-role="advanced-tag-details"]');
-    const preview = tab.panel.querySelector('[data-role="advanced-tag-preview"]');
-    if (preview) preview.textContent = result.tagged_text;
-    if (details) details.classList.remove('hidden');
-    return true;
+  function applyVisibleEmotionResult() {
+    return false;
   }
 
-  function scheduleEmotionAnalysis(tab, { immediate = false } = {}) {
+  function scheduleEmotionAnalysis(tab) {
     if (!tab) return;
-    const existing = state.emotionTimers.get(tab.id);
-    if (existing) clearTimeout(existing);
-    if (!shouldAutoEmotion(tab)) {
-      tab.emotion_summary = null;
-      tab.advanced_tagged_text = '';
-      const details = tab?.panel?.querySelector('[data-role="advanced-tag-details"]');
-      const preview = tab?.panel?.querySelector('[data-role="advanced-tag-preview"]');
-      if (details) details.classList.add('hidden');
-      if (preview) preview.textContent = '';
-      renderEmotionStatus(tab);
-      return;
-    }
     tab.emotion_summary = null;
-    renderEmotionStatus(tab, 'Reading the full script and selecting natural expression...');
-    const snapshot = tab.text;
-    const requestId = ++state.emotionRequestSerial;
-    const timer = setTimeout(async () => {
-      try {
-        const result = await api('/api/emotion/analyze', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: snapshot, model: $('#active-model')?.value || 'chatterbox-turbo' }),
-        });
-        if (requestId !== state.emotionRequestSerial && tab.text !== snapshot) return;
-        if (tab.text !== snapshot) return;
-        applyVisibleEmotionResult(tab, result, snapshot);
-        tab.emotion_summary = result;
-        renderEmotionStatus(tab);
-        saveTabs();
-      } catch (error) {
-        if (tab.text === snapshot) {
-          renderEmotionStatus(tab, 'Advanced emotion planning could not refresh the preview. Advanced generation will re-analyze the script on the server.');
-        }
-      } finally {
-        state.emotionTimers.delete(tab.id);
-      }
-    }, immediate ? 40 : 850);
-    state.emotionTimers.set(tab.id, timer);
+    tab.advanced_tagged_text = '';
+    renderEmotionStatus(tab);
   }
 
-  function insertTurboEventTag(tab, tag) {
-    const textarea = tab?.panel ? field(tab.panel, 'text') : null;
-    if (!textarea || !tag) return;
-    const start = textarea.selectionStart ?? textarea.value.length;
-    const end = textarea.selectionEnd ?? start;
-    const before = textarea.value.slice(0, start);
-    const after = textarea.value.slice(end);
-    const prefix = before && !/\s$/.test(before) ? ' ' : '';
-    const suffix = after && !/^\s/.test(after) ? ' ' : '';
-    const insertion = `${prefix}${tag}${suffix}`;
-    textarea.value = before + insertion + after;
-    const cursor = before.length + insertion.length;
-    textarea.focus();
-    textarea.setSelectionRange(cursor, cursor);
-    tab.text = textarea.value;
-    tab.panel.querySelector('[data-role="word-count"]').textContent = `${countWords(tab.text)} words`;
-    saveTabs();
-    scheduleEmotionAnalysis(tab, { immediate: true });
+  function insertTurboEventTag() {
+    // Manual event insertion is intentionally disabled in the fresh Turbo reset.
   }
 
   function updateAutoEmotionToggleState(tab) {
     if (!tab?.panel) return;
+    tab.auto_emotion = false;
     const button = tab.panel.querySelector('[data-action="toggle-auto-emotion"]');
-    if (!button) return;
-    const model = $('#active-model')?.value || state.initial?.active_model || '';
-    const turbo = model === 'chatterbox-turbo';
-    if (!turbo && tab.auto_emotion) {
-      tab.auto_emotion = false;
-      tab.emotion_summary = null;
-      tab.advanced_tagged_text = '';
+    if (button) {
+      button.classList.add('hidden');
+      button.disabled = true;
+      button.setAttribute('aria-pressed', 'false');
     }
-    const enabled = turbo && tab.auto_emotion === true;
-    button.disabled = !turbo;
-    button.classList.toggle('is-on', enabled);
-    button.setAttribute('aria-pressed', enabled ? 'true' : 'false');
-    button.title = !turbo
-      ? 'Auto Emotion is available only for Chatterbox Turbo.'
-      : enabled
-        ? 'Auto Emotion is on. Click to turn it off.'
-        : 'Auto Emotion is off. Click to enable it.';
-    const eventTools = tab.panel.querySelector('[data-role="turbo-event-tools"]');
-    if (eventTools) {
-      eventTools.classList.toggle('disabled', !turbo);
-      eventTools.querySelectorAll('button').forEach(item => { item.disabled = !turbo; });
-    }
-    renderEmotionStatus(tab);
   }
 
   function toggleAutoEmotion(tab) {
-    if (!tab?.panel) return;
-    const model = $('#active-model')?.value || state.initial?.active_model || '';
-    if (model !== 'chatterbox-turbo') {
-      toast('Auto Emotion is available only for Chatterbox Turbo.', 'error');
-      return;
-    }
-    tab.auto_emotion = !tab.auto_emotion;
-    if (!tab.auto_emotion) {
-      tab.emotion_summary = null;
-      tab.advanced_tagged_text = '';
-      const details = tab.panel.querySelector('[data-role="advanced-tag-details"]');
-      const preview = tab.panel.querySelector('[data-role="advanced-tag-preview"]');
-      if (details) details.classList.add('hidden');
-      if (preview) preview.textContent = '';
-    }
-    updateAutoEmotionToggleState(tab);
-    saveTabs();
-    if (tab.auto_emotion) scheduleEmotionAnalysis(tab, { immediate: true });
+    if (tab) tab.auto_emotion = false;
   }
 
   function formatTime(seconds, precise = false) {
@@ -749,41 +623,41 @@
     });
   }
 
-  function optionsFor(tab) {
+  function optionsFor() {
     return {
-      model: $('#active-model').value,
-      language: tab.language,
-      temperature: tab.temperature,
-      exaggeration: tab.exaggeration,
-      cfg_weight: tab.cfg_weight,
-      repetition_penalty: tab.repetition_penalty,
-      min_p: tab.min_p,
-      top_p: tab.top_p,
-      top_k: tab.top_k,
-      speed_factor: tab.speed_factor,
-      seed: tab.seed,
-      split_text: tab.split_text,
-      chunk_words: tab.chunk_words,
-      output_format: tab.output_format,
-      senior_pace_profile: tab.senior_pace_profile || '70s',
-      quality_gate: tab.quality_gate !== false,
-      speaker_consistency: tab.speaker_consistency !== false,
-      platform_assets: tab.platform_assets !== false,
+      model: 'chatterbox-turbo',
+      language: 'en',
+      temperature: 0.8,
+      exaggeration: 0.0,
+      cfg_weight: 0.0,
+      repetition_penalty: 1.2,
+      min_p: 0.0,
+      top_p: 0.95,
+      top_k: 1000,
+      speed_factor: 1.0,
+      seed: 0,
+      split_text: true,
+      chunk_words: 50,
+      output_format: 'wav',
+      senior_pace_profile: '70s',
+      quality_gate: false,
+      speaker_consistency: false,
+      platform_assets: false,
     };
   }
 
   function jobPayload(tab) {
     captureTab(tab);
     return {
-      preset: tab.preset,
-      generation_mode: 'advanced',
-      auto_emotion: Boolean(tab.auto_emotion),
+      preset: 'Chatterbox Turbo Default',
+      generation_mode: 'standard',
+      auto_emotion: false,
       audio_number: tab.number,
       title: tab.title,
       text: tab.text,
       voice_mode: tab.voice_mode,
       voice_filename: tab.voice_filename,
-      options: optionsFor(tab),
+      options: optionsFor(),
     };
   }
 
@@ -1339,8 +1213,7 @@
     } else if (qualityBox) {
       qualityBox.classList.add('hidden');
     }
-    const emotionText = job.auto_emotion ? ' • Auto Emotion on' : ' • Auto Emotion off';
-    panel.querySelector('[data-role="generation-meta"]').textContent = `Generation time ${humanDuration(job.elapsed_seconds)} • Duration ${formatTime(job.actual_audio_seconds || 0)} • Professional pipeline${emotionText}`;
+    panel.querySelector('[data-role="generation-meta"]').textContent = `Generation time ${humanDuration(job.elapsed_seconds)} • Duration ${formatTime(job.actual_audio_seconds || 0)} • Fresh Chatterbox Turbo • Loudness boosted`;
 
     if (!tab.waveform || tab.waveform.jobId !== job.id) {
       await loadWaveform(tab, job.id);
@@ -1650,6 +1523,22 @@
     });
   }
 
+  async function disconnectColabRuntime() {
+    const button = $('#disconnect-colab');
+    if (!button) return;
+    const confirmed = window.confirm('Disconnect and release this Google Colab runtime? The Audio Studio will close. Reconnect later from the Colab page.');
+    if (!confirmed) return;
+    button.disabled = true;
+    try {
+      const result = await api('/api/runtime/disconnect', { method: 'POST' });
+      toast(result.message || 'Colab disconnect requested.', 'success');
+      button.textContent = 'Disconnecting…';
+    } catch (error) {
+      button.disabled = false;
+      toast(error.message, 'error');
+    }
+  }
+
   async function init() {
     initTheme();
     try {
@@ -1674,6 +1563,11 @@
       renderActive();
     });
     setModelState(state.initial.engine);
+    const disconnectButton = $('#disconnect-colab');
+    if (disconnectButton) {
+      disconnectButton.classList.toggle('hidden', !state.initial.runtime?.colab_disconnect_supported);
+      disconnectButton.addEventListener('click', disconnectColabRuntime);
+    }
 
     restoreTabs();
     buildTabs();

@@ -2,34 +2,31 @@ server:
   host: 0.0.0.0
   port: 8004
   auto_load_model: true
-
 tts_engine:
   device: auto
   default_model: chatterbox-turbo
   predefined_voices_path: voices
   reference_audio_path: reference_audio
-
 storage:
   outputs_path: outputs
   data_path: data
   logs_path: logs
-
 generation_defaults:
-  preset: Motivational Speech
+  preset: Chatterbox Turbo Default
   language: en
-  temperature: 0.72
-  exaggeration: 0.58
-  cfg_weight: 0.35
-  repetition_penalty: 1.20
-  min_p: 0.05
-  top_p: 1.0
+  temperature: 0.8
+  exaggeration: 0.0
+  cfg_weight: 0.0
+  repetition_penalty: 1.2
+  min_p: 0.0
+  top_p: 0.95
   top_k: 1000
   speed_factor: 1.0
-  seed: 2025
+  seed: 0
   split_text: true
-  chunk_words: 85
+  chunk_words: 50
   output_format: wav
   senior_pace_profile: 70s
-  quality_gate: true
-  speaker_consistency: true
-  platform_assets: true
+  quality_gate: false
+  speaker_consistency: false
+  platform_assets: false
