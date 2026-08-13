@@ -33,7 +33,7 @@ from storage import AUDIO_EXTENSIONS, Storage
 from utils import safe_filename
 
 APP_NAME = "SoftMeta Chatterbox TTS Server"
-APP_VERSION = "1.6.2"
+APP_VERSION = "1.6.4"
 logger = logging.getLogger("softmeta.chatterbox")
 
 config = load_config()

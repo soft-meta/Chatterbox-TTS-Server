@@ -172,7 +172,7 @@ def split_turbo_long_text(text: str, max_chars: int = TURBO_MAX_CHARS) -> list[s
 class QueueManager:
     """Simple single-GPU Chatterbox Turbo queue.
 
-    v1.6.2 keeps the fast, direct Turbo generation architecture.
+    v1.6.4 keeps the fast, direct Turbo generation architecture.
     The only output processing after model generation is final loudness normalisation.
     """
 
