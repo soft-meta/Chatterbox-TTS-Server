@@ -1613,6 +1613,23 @@
     });
   }
 
+  function formatColabRuntime(seconds) {
+    const total = Math.max(0, Math.floor(Number(seconds) || 0));
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const secs = total % 60;
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  }
+
+  function updateColabRuntimeTimer() {
+    const timer = $('#colab-runtime-timer');
+    const startedAt = Number(state.initial?.runtime?.server_started_at);
+    if (!timer || !Number.isFinite(startedAt) || startedAt <= 0) return;
+    const elapsed = (Date.now() / 1000) - startedAt;
+    timer.textContent = `Online ${formatColabRuntime(elapsed)}`;
+    timer.title = `Colab Audio Studio has been online for ${formatColabRuntime(elapsed)}`;
+  }
+
   async function disconnectColabRuntime() {
     const button = $('#disconnect-colab');
     if (!button) return;
@@ -1622,7 +1639,8 @@
     try {
       const result = await api('/api/runtime/disconnect', { method: 'POST' });
       toast(result.message || 'Colab disconnect requested.', 'success');
-      button.textContent = 'Disconnecting…';
+      const label = $('#disconnect-colab-label');
+      if (label) label.textContent = 'Disconnecting…';
     } catch (error) {
       button.disabled = false;
       toast(error.message, 'error');
@@ -1657,6 +1675,8 @@
     if (disconnectButton) {
       disconnectButton.classList.toggle('hidden', !state.initial.runtime?.colab_disconnect_supported);
       disconnectButton.addEventListener('click', disconnectColabRuntime);
+      updateColabRuntimeTimer();
+      window.setInterval(updateColabRuntimeTimer, 1000);
     }
 
     loadQueueOrder();

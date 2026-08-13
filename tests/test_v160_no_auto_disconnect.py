@@ -16,7 +16,7 @@ def test_generation_code_never_requests_colab_disconnect():
 
 
 def test_colab_start_cell_supervises_server_instead_of_auto_stopping():
-    nb = (ROOT / 'colab' / 'SoftMeta_Chatterbox_TTS_Colab_v1.6.7.ipynb').read_text(encoding='utf-8')
+    nb = (ROOT / 'colab' / 'SoftMeta_Chatterbox_TTS_Colab_v1.6.8.ipynb').read_text(encoding='utf-8')
     assert 'KEEP_RUNTIME_ACTIVE' in nb
     assert 'Server exited unexpectedly with code' in nb
     assert 'restarting...' in nb

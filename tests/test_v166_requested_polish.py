@@ -37,17 +37,18 @@ def test_option_payload_does_not_send_hidden_sampling_controls_from_ui():
     assert 'output_format:' in block
 
 
-def test_long_silence_compactor_caps_only_abnormal_silence():
-    from queue_manager import compact_excessive_sentence_silence
+def test_sentence_pause_targets_sentence_gap_not_short_breath():
+    from queue_manager import apply_sentence_end_pause
     sr = 24000
     tone = (0.03 * np.sin(2 * np.pi * 180 * np.arange(int(sr * .4)) / sr)).astype(np.float32)
     normal_pause = np.zeros(int(sr * .22), dtype=np.float32)
     long_pause = np.zeros(int(sr * .95), dtype=np.float32)
     audio = np.concatenate([tone, normal_pause, tone, long_pause, tone])
-    out = compact_excessive_sentence_silence(audio, sr)
-    # The 220ms natural pause stays effectively intact; the 950ms gap is shortened.
-    assert len(out) < len(audio) - int(sr * .45)
-    assert len(out) > len(audio) - int(sr * .80)
+    out = apply_sentence_end_pause(audio, sr, 'First clause with breath. Second sentence.', 280)
+    # The strongest punctuation-like gap is normalized to 280ms while the shorter breath stays.
+    expected_removed = int(sr * (.95 - .28))
+    removed = len(audio) - len(out)
+    assert abs(removed - expected_removed) < int(sr * .08)
 
 
 def test_motivational_join_pause_is_shorter_than_previous_140ms():
@@ -83,4 +84,4 @@ def test_server_supports_format_aware_full_and_cut_downloads():
 
 def test_version_is_166():
     server = (ROOT / 'server.py').read_text(encoding='utf-8')
-    assert 'APP_VERSION = "1.6.7"' in server
+    assert 'APP_VERSION = "1.6.8"' in server

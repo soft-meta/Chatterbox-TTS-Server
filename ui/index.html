@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f7f9fc">
   <title>SoftMeta Chatterbox TTS Server</title>
-  <link rel="stylesheet" href="/static/styles.css?v=1.6.7">
+  <link rel="stylesheet" href="/static/styles.css?v=1.6.8">
 </head>
 <body>
   <header class="app-header">
@@ -25,7 +25,7 @@
           <a class="api-link" href="/docs" target="_blank" rel="noopener">API Docs</a>
           <a class="api-sub-link" href="/docs" target="_blank" rel="noopener">Chatterbox TTS API</a>
         </div>
-        <button id="disconnect-colab" class="button button-danger-soft hidden" type="button" title="Disconnect and release this Google Colab runtime">Disconnect Colab</button>
+        <button id="disconnect-colab" class="button button-danger-soft disconnect-colab-button hidden" type="button" title="Disconnect and release this Google Colab runtime"><span id="disconnect-colab-label">Disconnect Colab</span><span id="colab-runtime-timer" class="colab-runtime-timer">Online 00:00:00</span></button>
         <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle light and dark theme">
           <span class="theme-icon">☀</span>
         </button>
@@ -72,7 +72,7 @@
   </main>
 
   <footer class="app-footer">
-    <span><a href="https://github.com/soft-meta/chatterbox-v2" target="_blank" rel="noopener">SoftMeta Chatterbox TTS</a> Server v1.6.7</span>
+    <span><a href="https://github.com/soft-meta/chatterbox-v2" target="_blank" rel="noopener">SoftMeta Chatterbox TTS</a> Server v1.6.8</span>
     <span>Powered by the official open-source Chatterbox engine</span>
   </footer>
 
@@ -210,7 +210,7 @@
         <div class="parameter-bottom-grid output-format-grid">
           <label class="slider-field">
             <span><b>Sentence End Pause</b><output data-output="sentence_end_pause_ms"></output></span>
-            <input data-field="sentence_end_pause_ms" type="range" min="120" max="600" step="10">
+            <input data-field="sentence_end_pause_ms" type="range" min="0" max="600" step="10">
           </label>
           <label class="field">
             <span>Output Format</span>
@@ -307,6 +307,6 @@
 
 
 
-  <script src="/static/app.js?v=1.6.7" defer></script>
+  <script src="/static/app.js?v=1.6.8" defer></script>
 </body>
 </html>

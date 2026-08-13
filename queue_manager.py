@@ -173,73 +173,109 @@ def split_turbo_long_text(text: str, max_chars: int = TURBO_MAX_CHARS) -> list[s
     return chunks
 
 
-# Keep natural punctuation breaths, but cap only the unusually long dead-air gaps
-# that can make long senior narration feel stalled. This does not time-stretch
-# speech or rewrite text; it only shortens near-silence longer than ~0.48 seconds.
-def compact_excessive_sentence_silence(
+# Sentence End Pause is a creator control, not a vague long-silence limiter.
+# For each Turbo chunk we know how many sentence boundaries are inside the text.
+# We therefore normalize only the same number of strongest internal near-silence
+# gaps, preserving short breaths and hesitations. Chunk-edge silence is removed so
+# the explicit inter-chunk sentence pause is not doubled by model tail silence.
+def _sentence_boundary_count(text: str) -> int:
+    clean = (text or "").strip()
+    if not clean:
+        return 0
+    parts = [part for part in _SENTENCE_RE.split(clean) if part.strip()]
+    return max(0, len(parts) - 1)
+
+
+def _silence_runs(
     audio: np.ndarray,
     sample_rate: int,
     *,
-    min_silence_ms: int = 480,
-    internal_keep_ms: int = 280,
-    leading_keep_ms: int = 45,
-    trailing_keep_ms: int = 70,
-) -> np.ndarray:
-    data = np.asarray(audio, dtype=np.float32).reshape(-1).copy()
+    min_silence_ms: int = 80,
+) -> list[tuple[int, int]]:
+    data = np.asarray(audio, dtype=np.float32).reshape(-1)
     if data.size == 0 or sample_rate <= 0:
-        return data
-    data = np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)
-
-    frame_ms = 20
+        return []
+    frame_ms = 10
     frame_samples = max(1, int(round(sample_rate * frame_ms / 1000.0)))
     frame_count = int(math.ceil(data.size / frame_samples))
     padded = np.pad(data, (0, frame_count * frame_samples - data.size))
     frames = padded.reshape(frame_count, frame_samples)
     rms = np.sqrt(np.mean(np.square(frames, dtype=np.float64), axis=1) + 1e-12)
     db = 20.0 * np.log10(np.maximum(rms, 1e-6))
-
-    # Adaptive threshold stays well below real speech, including mature/breathy
-    # voices, so normal quiet syllables are not mistaken for pauses.
     speech_reference = float(np.percentile(db, 80))
-    silence_threshold = float(np.clip(speech_reference - 30.0, -56.0, -42.0))
+    silence_threshold = float(np.clip(speech_reference - 30.0, -58.0, -42.0))
     silent = db <= silence_threshold
     min_frames = max(1, int(math.ceil(min_silence_ms / frame_ms)))
 
     runs: list[tuple[int, int]] = []
-    start: int | None = None
-    for index, is_silent in enumerate(silent):
-        if is_silent and start is None:
-            start = index
-        elif not is_silent and start is not None:
-            if index - start >= min_frames:
-                runs.append((start, index))
-            start = None
-    if start is not None and frame_count - start >= min_frames:
-        runs.append((start, frame_count))
+    run_start: int | None = None
+    for idx, is_silent in enumerate(silent):
+        if is_silent and run_start is None:
+            run_start = idx
+        elif not is_silent and run_start is not None:
+            if idx - run_start >= min_frames:
+                runs.append((run_start * frame_samples, min(data.size, idx * frame_samples)))
+            run_start = None
+    if run_start is not None and frame_count - run_start >= min_frames:
+        runs.append((run_start * frame_samples, data.size))
+    return runs
+
+
+def apply_sentence_end_pause(
+    audio: np.ndarray,
+    sample_rate: int,
+    text: str,
+    pause_ms: int,
+) -> np.ndarray:
+    """Normalize actual sentence-ending pauses to the selected duration.
+
+    ``pause_ms`` may be 0..600. The function changes only the strongest internal
+    silence gaps needed for the known number of text sentence boundaries. Shorter
+    breath pauses are left intact. Leading/trailing model silence is stripped when
+    clearly present so chunk joins can add the requested pause exactly once.
+    """
+    data = np.asarray(audio, dtype=np.float32).reshape(-1).copy()
+    if data.size == 0 or sample_rate <= 0:
+        return data
+    data = np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)
+    target_ms = int(max(0, min(600, int(pause_ms))))
+    runs = _silence_runs(data, sample_rate, min_silence_ms=80)
     if not runs:
         return data
 
+    edge_samples = int(round(sample_rate * 0.060))
+    leading_run = next((r for r in runs if r[0] <= edge_samples), None)
+    trailing_run = next((r for r in reversed(runs) if r[1] >= data.size - edge_samples), None)
+
+    # Work only with internal gaps for sentence boundaries.
+    internal = [
+        r for r in runs
+        if r is not leading_run and r is not trailing_run
+    ]
+    boundary_count = _sentence_boundary_count(text)
+    # The longest internal gaps are overwhelmingly the punctuation boundaries;
+    # shorter breathing gaps remain untouched.
+    selected = set(
+        sorted(internal, key=lambda r: (r[1] - r[0]), reverse=True)[:boundary_count]
+    )
+
     parts: list[np.ndarray] = []
     cursor = 0
-    edge_tolerance = frame_samples * 2
-    for start_frame, end_frame in runs:
-        start_sample = min(data.size, start_frame * frame_samples)
-        end_sample = min(data.size, end_frame * frame_samples)
+    for run in sorted(runs, key=lambda r: r[0]):
+        start_sample, end_sample = run
         if start_sample < cursor or end_sample <= start_sample:
             continue
         parts.append(data[cursor:start_sample])
-        is_leading = start_sample <= edge_tolerance
-        is_trailing = end_sample >= data.size - edge_tolerance
-        if is_leading:
-            keep_ms = leading_keep_ms
-        elif is_trailing:
-            keep_ms = trailing_keep_ms
+        if run is leading_run or run is trailing_run:
+            # Strip model-generated edge dead air. The queue owns the exact join.
+            keep_samples = 0
+        elif run in selected:
+            keep_samples = int(round(sample_rate * target_ms / 1000.0))
         else:
-            keep_ms = internal_keep_ms
-        run_ms = (end_sample - start_sample) * 1000.0 / sample_rate
-        keep_ms = min(float(keep_ms), run_ms)
-        keep_samples = max(0, int(round(sample_rate * keep_ms / 1000.0)))
-        if keep_samples:
+            # Preserve non-sentence breaths/hesitations exactly as generated.
+            parts.append(data[start_sample:end_sample])
+            keep_samples = 0
+        if keep_samples > 0:
             parts.append(np.zeros(keep_samples, dtype=np.float32))
         cursor = end_sample
     parts.append(data[cursor:])
@@ -249,7 +285,7 @@ def compact_excessive_sentence_silence(
 class QueueManager:
     """Simple single-GPU Chatterbox Turbo queue.
 
-    v1.6.7 keeps the fast, direct Turbo generation architecture.
+    v1.6.8 keeps the fast, direct Turbo generation architecture.
     The only output processing after model generation is final loudness normalisation.
     """
 
@@ -657,16 +693,13 @@ class QueueManager:
                 if audio.size == 0 or not np.isfinite(audio).all():
                     raise RuntimeError(f"Chatterbox Turbo returned invalid audio for chunk {index}/{len(chunks)}.")
 
-                # Polish only excessive dead-air. The creator-facing Sentence End
-                # Pause control sets how much of a long internal punctuation pause is
-                # kept. Short natural pauses stay untouched and are never lengthened.
+                # Apply the creator-selected pause to real sentence boundaries.
+                # Unlike v1.6.7 this is measurable at 0, 350, 600ms etc.
                 sentence_end_pause_ms = int(options.get(
                     "sentence_end_pause_ms", DEFAULT_SENTENCE_END_PAUSE_MS
                 ))
-                audio = compact_excessive_sentence_silence(
-                    audio,
-                    result.sample_rate,
-                    internal_keep_ms=sentence_end_pause_ms,
+                audio = apply_sentence_end_pause(
+                    audio, result.sample_rate, chunk, sentence_end_pause_ms
                 )
 
                 if output_file is None:
@@ -679,9 +712,15 @@ class QueueManager:
 
                 output_file.write(audio)
                 if index < len(chunks):
-                    pause_ms = max(0, int(options.get("inter_chunk_pause_ms", TURBO_INTER_CHUNK_PAUSE_MS)))
-                    pause = int(result.sample_rate * pause_ms / 1000.0)
-                    output_file.write(np.zeros(pause, dtype=np.float32))
+                    # If the chunk ends at sentence punctuation, the creator's
+                    # Sentence End Pause owns the join. Oversize mid-sentence splits
+                    # use only a tiny continuity gap.
+                    clean_chunk = chunk.rstrip().rstrip('"\'”’)]')
+                    ends_sentence = bool(clean_chunk) and clean_chunk[-1:] in {".", "!", "?"}
+                    pause_ms = sentence_end_pause_ms if ends_sentence else 40
+                    if pause_ms > 0:
+                        pause = int(result.sample_rate * pause_ms / 1000.0)
+                        output_file.write(np.zeros(pause, dtype=np.float32))
 
                 completed_words += chunk_words
                 job["completed_words"] = min(completed_words, job["total_words"])

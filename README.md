@@ -1,10 +1,10 @@
 # SoftMeta Chatterbox TTS Server
 
-## v1.6.7 Turbo Creator Controls
+## v1.6.8 Turbo Creator Controls
 
 Colab setup now checks the GitHub server version before the heavy Torch/Chatterbox install, accepts compatible v1.6.2+ servers within the v1.6 line instead of aborting on an exact-version mismatch, and verifies the installed Turbo generate() signature before startup. Micromamba still uses the official micro.mamba.pm endpoint first with the pinned GitHub release as fallback; partial or invalid downloads are discarded before reuse.
 
-v1.6.7 keeps the clean Chatterbox Turbo generation architecture from v1.6.0 and restores the creator controls requested from v1.2.1. No Auto Emotion, ASR/QC, speaker verification, retry/rescue, pronunciation rewrite, prosody stack, EQ/compression or advanced mastering has been reintroduced.
+v1.6.8 keeps the clean Chatterbox Turbo generation architecture from v1.6.0 and restores the creator controls requested from v1.2.1. No Auto Emotion, ASR/QC, speaker verification, retry/rescue, pronunciation rewrite, prosody stack, EQ/compression or advanced mastering has been reintroduced.
 
 ### Presets
 
@@ -25,4 +25,4 @@ Long scripts are split into sentence-safe chunks capped near 300 characters. Eac
 
 ### Colab
 
-The v1.6.7 Colab notebook keeps the server alive under the existing supervisor and retains the manual Disconnect Colab control.
+The v1.6.8 Colab notebook keeps the server alive under the existing supervisor and retains the manual Disconnect Colab control.

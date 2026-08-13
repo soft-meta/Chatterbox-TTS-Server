@@ -34,7 +34,8 @@ from storage import AUDIO_EXTENSIONS, Storage
 from utils import safe_filename
 
 APP_NAME = "SoftMeta Chatterbox TTS Server"
-APP_VERSION = "1.6.7"
+APP_VERSION = "1.6.8"
+SERVER_STARTED_AT = time.time()
 logger = logging.getLogger("softmeta.chatterbox")
 
 config = load_config()
@@ -186,6 +187,7 @@ def initial_data() -> dict[str, Any]:
         },
         "runtime": {
             "colab_disconnect_supported": bool(os.getenv("TBE_RUNTIME_ADDR")),
+            "server_started_at": SERVER_STARTED_AT,
         },
     }
 
