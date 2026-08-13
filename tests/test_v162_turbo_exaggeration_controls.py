@@ -41,7 +41,7 @@ def test_v162_backend_preserves_creator_controls():
     req = AudioJobCreate(
         preset='Motivational Speech', text='Hello world.', voice_mode='default',
         options={
-            'model': 'chatterbox-turbo', 'temperature': 0.72, 'top_p': 0.90,
+            'model': 'chatterbox-turbo', 'temperature': 0.72, 'top_p': 0.95,
             'top_k': 1000, 'repetition_penalty': 1.2,
             'exaggeration': 1.25, 'cfg_weight': 0.45,
             'speed_factor': 0.93,
@@ -89,22 +89,22 @@ def _load_real_engine_module():
 
 def test_v162_exaggeration_and_cfg_change_effective_turbo_sampling():
     module = _load_real_engine_module()
-    low = module._turbo_creator_sampling(0.72, 0.90, exaggeration=0.0, cfg_weight=0.0)
-    neutral = module._turbo_creator_sampling(0.72, 0.90, exaggeration=0.5, cfg_weight=0.0)
-    high = module._turbo_creator_sampling(0.72, 0.90, exaggeration=1.5, cfg_weight=0.0)
-    guided = module._turbo_creator_sampling(0.72, 0.90, exaggeration=1.5, cfg_weight=1.0)
-    assert neutral == (0.72, 0.90)
+    low = module._turbo_creator_sampling(0.72, 0.95, exaggeration=0.0, cfg_weight=0.0)
+    neutral = module._turbo_creator_sampling(0.72, 0.95, exaggeration=0.5, cfg_weight=0.0)
+    high = module._turbo_creator_sampling(0.72, 0.95, exaggeration=1.5, cfg_weight=0.0)
+    guided = module._turbo_creator_sampling(0.72, 0.95, exaggeration=1.5, cfg_weight=1.0)
+    assert neutral == (0.72, 0.95)
     assert high[0] > neutral[0] > low[0]
-    assert high[1] > neutral[1] > low[1]
+    assert high[1] == neutral[1] == low[1] == 0.95
     assert guided[0] < high[0]
-    assert guided[1] < high[1]
+    assert guided[1] == high[1] == 0.95
 
 
 def test_v162_engine_service_applies_creator_bridge_to_generation_settings():
     module = _load_real_engine_module()
     service = module.EngineService(device='cpu')
     options = {
-        'temperature': 0.72, 'top_p': 0.90, 'top_k': 1000,
+        'temperature': 0.72, 'top_p': 0.95, 'top_k': 1000,
         'repetition_penalty': 1.2, 'min_p': 0.0, 'seed': 123,
         'exaggeration': 1.5, 'cfg_weight': 0.0,
     }
@@ -114,6 +114,6 @@ def test_v162_engine_service_applies_creator_bridge_to_generation_settings():
     )
     settings = service.runtime.last_generate['settings']
     assert settings.temperature > 0.72
-    assert settings.top_p > 0.90
+    assert settings.top_p == 0.95
     assert settings.exaggeration == 1.5
     assert settings.cfg_weight == 0.0

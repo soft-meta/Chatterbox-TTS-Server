@@ -11,14 +11,14 @@ def test_v161_exposes_motivational_preset_and_turbo_controls():
     server = (ROOT/'server.py').read_text(encoding='utf-8')
     html = (ROOT/'ui/index.html').read_text(encoding='utf-8')
     js = (ROOT/'ui/app.js').read_text(encoding='utf-8')
-    assert 'APP_VERSION = "1.6.4"' in server
+    assert 'APP_VERSION = "1.6.6"' in server
     assert '"name": "Motivational Speech"' in server
     assert '<section class="preset-section">' in html
     assert '<details class="parameters-panel"' in html
     assert 'data-field="temperature"' in html
-    assert 'data-field="top_p"' in html
-    assert 'data-field="top_k"' in html
-    assert 'data-field="repetition_penalty"' in html
+    assert 'data-field="top_p"' not in html
+    assert 'data-field="top_k"' not in html
+    assert 'data-field="repetition_penalty"' not in html
     assert 'data-field="speed_factor"' in html
     assert 'Original-only' not in html
     assert 'optionsFor(tab)' in js
@@ -28,11 +28,11 @@ def test_motivational_profile_matches_v121_turbo_delivery():
     import server
     p = next(item for item in server.PRESETS if item['name']=='Motivational Speech')
     assert p['temperature'] == 0.72
-    assert p['top_p'] == 0.90
+    assert p['top_p'] == 0.95
     assert p['top_k'] == 1000
     assert p['repetition_penalty'] == 1.2
     assert p['speed_factor'] == 0.93
-    assert p['inter_chunk_pause_ms'] == 140
+    assert p['inter_chunk_pause_ms'] == 70
     assert p['exaggeration'] == 0.5
     assert p['cfg_weight'] == 0.0
 
@@ -42,7 +42,7 @@ def test_config_defaults_to_motivational_speech_but_keeps_qc_off():
     d = cfg['generation_defaults']
     assert d['preset'] == 'Motivational Speech'
     assert d['temperature'] == 0.72
-    assert d['top_p'] == 0.90
+    assert d['top_p'] == 0.95
     assert d['top_k'] == 1000
     assert d['repetition_penalty'] == 1.2
     assert d['speed_factor'] == 0.93
@@ -67,9 +67,9 @@ def test_backend_honors_user_turbo_controls_instead_of_forcing_defaults():
     o = QueueManager._effective_options(req)
     assert o['model'] == 'chatterbox-turbo'
     assert o['temperature'] == 0.61
-    assert o['top_p'] == 0.82
-    assert o['top_k'] == 777
-    assert o['repetition_penalty'] == 1.31
+    assert o['top_p'] == 0.95
+    assert o['top_k'] == 1000
+    assert o['repetition_penalty'] == 1.2
     assert o['speed_factor'] == 0.97
     assert o['exaggeration'] == 0.8
     assert o['cfg_weight'] == 0.7

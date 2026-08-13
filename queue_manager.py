@@ -29,7 +29,7 @@ ACTIVE_STATES = {"queued", "running"}
 # pronunciation layer, emotion layer, pacing layer, ASR, speaker-QC or rescue
 # regeneration is performed.
 TURBO_MAX_CHARS = 300
-TURBO_INTER_CHUNK_PAUSE_MS = 80
+TURBO_INTER_CHUNK_PAUSE_MS = 70
 
 # Official Turbo Gradio defaults (seed 0 means random there).
 OFFICIAL_TURBO_PROFILE: dict[str, Any] = {
@@ -63,15 +63,16 @@ MOTIVATIONAL_TURBO_PROFILE: dict[str, Any] = {
     "exaggeration": 0.5,
     "cfg_weight": 0.0,
     "repetition_penalty": 1.2,
-    "top_p": 0.90,
+    "top_p": 0.95,
     "top_k": 1000,
     "speed_factor": 0.93,
-    "inter_chunk_pause_ms": 140,
+    "inter_chunk_pause_ms": 70,
 }
 
 _TURBO_USER_CONTROLS = {
-    "temperature", "exaggeration", "cfg_weight", "repetition_penalty", "top_p", "top_k",
-    "speed_factor", "seed", "inter_chunk_pause_ms",
+    # Only the four creator-facing controls requested by the user are accepted
+    # from the UI. Turbo's other sampling values stay at stable model defaults.
+    "temperature", "exaggeration", "cfg_weight", "speed_factor",
 }
 
 # Keep the user's current louder delivery while making the processing transparent:
@@ -169,10 +170,81 @@ def split_turbo_long_text(text: str, max_chars: int = TURBO_MAX_CHARS) -> list[s
     return chunks
 
 
+# Keep natural punctuation breaths, but cap only the unusually long dead-air gaps
+# that can make long senior narration feel stalled. This does not time-stretch
+# speech or rewrite text; it only shortens near-silence longer than ~0.48 seconds.
+def compact_excessive_sentence_silence(
+    audio: np.ndarray,
+    sample_rate: int,
+    *,
+    min_silence_ms: int = 480,
+    internal_keep_ms: int = 280,
+    leading_keep_ms: int = 45,
+    trailing_keep_ms: int = 70,
+) -> np.ndarray:
+    data = np.asarray(audio, dtype=np.float32).reshape(-1).copy()
+    if data.size == 0 or sample_rate <= 0:
+        return data
+    data = np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)
+
+    frame_ms = 20
+    frame_samples = max(1, int(round(sample_rate * frame_ms / 1000.0)))
+    frame_count = int(math.ceil(data.size / frame_samples))
+    padded = np.pad(data, (0, frame_count * frame_samples - data.size))
+    frames = padded.reshape(frame_count, frame_samples)
+    rms = np.sqrt(np.mean(np.square(frames, dtype=np.float64), axis=1) + 1e-12)
+    db = 20.0 * np.log10(np.maximum(rms, 1e-6))
+
+    # Adaptive threshold stays well below real speech, including mature/breathy
+    # voices, so normal quiet syllables are not mistaken for pauses.
+    speech_reference = float(np.percentile(db, 80))
+    silence_threshold = float(np.clip(speech_reference - 30.0, -56.0, -42.0))
+    silent = db <= silence_threshold
+    min_frames = max(1, int(math.ceil(min_silence_ms / frame_ms)))
+
+    runs: list[tuple[int, int]] = []
+    start: int | None = None
+    for index, is_silent in enumerate(silent):
+        if is_silent and start is None:
+            start = index
+        elif not is_silent and start is not None:
+            if index - start >= min_frames:
+                runs.append((start, index))
+            start = None
+    if start is not None and frame_count - start >= min_frames:
+        runs.append((start, frame_count))
+    if not runs:
+        return data
+
+    parts: list[np.ndarray] = []
+    cursor = 0
+    edge_tolerance = frame_samples * 2
+    for start_frame, end_frame in runs:
+        start_sample = min(data.size, start_frame * frame_samples)
+        end_sample = min(data.size, end_frame * frame_samples)
+        if start_sample < cursor or end_sample <= start_sample:
+            continue
+        parts.append(data[cursor:start_sample])
+        is_leading = start_sample <= edge_tolerance
+        is_trailing = end_sample >= data.size - edge_tolerance
+        if is_leading:
+            keep_ms = leading_keep_ms
+        elif is_trailing:
+            keep_ms = trailing_keep_ms
+        else:
+            keep_ms = internal_keep_ms
+        keep_samples = max(0, int(round(sample_rate * keep_ms / 1000.0)))
+        if keep_samples:
+            parts.append(np.zeros(keep_samples, dtype=np.float32))
+        cursor = end_sample
+    parts.append(data[cursor:])
+    return np.concatenate(parts).astype(np.float32, copy=False) if parts else data
+
+
 class QueueManager:
     """Simple single-GPU Chatterbox Turbo queue.
 
-    v1.6.4 keeps the fast, direct Turbo generation architecture.
+    v1.6.6 keeps the fast, direct Turbo generation architecture.
     The only output processing after model generation is final loudness normalisation.
     """
 
@@ -579,6 +651,10 @@ class QueueManager:
                 audio = result.waveform.squeeze().numpy().astype(np.float32, copy=False)
                 if audio.size == 0 or not np.isfinite(audio).all():
                     raise RuntimeError(f"Chatterbox Turbo returned invalid audio for chunk {index}/{len(chunks)}.")
+
+                # Polish only excessive dead-air. Normal punctuation pauses remain
+                # untouched, while rare long sentence gaps are shortened.
+                audio = compact_excessive_sentence_silence(audio, result.sample_rate)
 
                 if output_file is None:
                     output_file = sf.SoundFile(

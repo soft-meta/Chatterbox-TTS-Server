@@ -47,7 +47,7 @@ def test_each_safe_chunk_is_generated_exactly_once_and_only_loudness_runs(tmp_pa
     assert len(engine.calls) == len(expected)
     assert all(c[1]=='chatterbox-turbo' for c in engine.calls)
     assert all(c[3]=='en' for c in engine.calls)
-    assert all(c[4]['temperature']==0.72 and c[4]['top_p']==0.90 and c[4]['top_k']==1000 for c in engine.calls)
+    assert all(c[4]['temperature']==0.72 and c[4]['top_p']==0.95 and c[4]['top_k']==1000 for c in engine.calls)
     assert called and len(called)==1
     assert job['status']=='completed'
     assert job['quality_summary'] is None

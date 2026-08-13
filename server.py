@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import subprocess
 import time
 import urllib.request
 from contextlib import asynccontextmanager
@@ -33,7 +34,7 @@ from storage import AUDIO_EXTENSIONS, Storage
 from utils import safe_filename
 
 APP_NAME = "SoftMeta Chatterbox TTS Server"
-APP_VERSION = "1.6.4"
+APP_VERSION = "1.6.6"
 logger = logging.getLogger("softmeta.chatterbox")
 
 config = load_config()
@@ -61,10 +62,10 @@ PRESETS = [
         "cfg_weight": 0.0,
         "repetition_penalty": 1.2,
         "min_p": 0.0,
-        "top_p": 0.90,
+        "top_p": 0.95,
         "top_k": 1000,
         "speed_factor": 0.93,
-        "inter_chunk_pause_ms": 140,
+        "inter_chunk_pause_ms": 70,
         "seed": 0,
         "split_text": True,
         "chunk_words": 50,
@@ -367,6 +368,43 @@ def _attachment_response(path: Path, *, media_type: str | None = None) -> FileRe
     )
 
 
+
+DOWNLOAD_FORMATS = {"wav", "mp3", "m4a", "flac"}
+
+
+def _normalise_download_format(value: str | None) -> str:
+    fmt = (value or "wav").strip().lower()
+    if fmt not in DOWNLOAD_FORMATS:
+        raise HTTPException(400, f"Unsupported audio format: {fmt}")
+    return fmt
+
+
+def _convert_audio_format(source: Path, output_format: str) -> Path:
+    """Create/cache a download copy without changing the generated source WAV."""
+    fmt = _normalise_download_format(output_format)
+    if fmt == "wav":
+        return source
+    destination = source.with_suffix(f".{fmt}")
+    if destination.is_file() and destination.stat().st_mtime >= source.stat().st_mtime:
+        return destination
+    temp = destination.with_name(destination.stem + ".tmp" + destination.suffix)
+    temp.unlink(missing_ok=True)
+    codecs = {
+        "mp3": ["-c:a", "libmp3lame", "-b:a", "192k"],
+        "m4a": ["-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart"],
+        "flac": ["-c:a", "flac", "-compression_level", "5"],
+    }
+    try:
+        subprocess.run(
+            ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(source), *codecs[fmt], str(temp)],
+            check=True,
+        )
+        temp.replace(destination)
+    except (FileNotFoundError, subprocess.CalledProcessError) as error:
+        temp.unlink(missing_ok=True)
+        raise HTTPException(500, f"Could not create {fmt.upper()} download. FFmpeg conversion failed.") from error
+    return destination
+
 def _completed_job_audio_path(job_id: str) -> Path:
     try:
         job = queue.get(job_id)
@@ -395,8 +433,15 @@ def job_audio(job_id: str, download: bool = False) -> FileResponse:
 
 
 @app.get("/api/jobs/{job_id}/download")
-def job_audio_download(job_id: str) -> FileResponse:
-    return _attachment_response(_completed_job_audio_path(job_id), media_type="audio/wav")
+def job_audio_download(job_id: str, format: str | None = None) -> FileResponse:
+    source = _completed_job_audio_path(job_id)
+    try:
+        job = queue.get(job_id)
+    except KeyError as error:
+        raise HTTPException(404, "Job not found.") from error
+    requested = format or str(job.get("options", {}).get("output_format", "wav"))
+    path = _convert_audio_format(source, requested)
+    return _attachment_response(path)
 
 
 @app.get("/api/outputs/{filename}/download")
@@ -505,16 +550,21 @@ async def cut_audio(job_id: str, request: CutRequest) -> dict[str, Any]:
     source = storage.output_path(job["output_filename"])
     title = safe_filename(job["title"] or f"Audio_{job['audio_number']}")
     prefix = safe_filename(request.filename_prefix, "Selected")
-    filename = f"{prefix}_{title}.wav"
-    destination = storage.output_path(filename)
-    destination.unlink(missing_ok=True)
+    fmt = _normalise_download_format(getattr(request, "output_format", None) or str(job.get("options", {}).get("output_format", "wav")))
+    wav_filename = f"{prefix}_{title}.wav"
+    wav_destination = storage.output_path(wav_filename)
+    wav_destination.unlink(missing_ok=True)
     duration = await asyncio.to_thread(
         _cut_audio,
         source,
-        destination,
+        wav_destination,
         request.start_seconds,
         request.end_seconds,
     )
+    destination = await asyncio.to_thread(_convert_audio_format, wav_destination, fmt)
+    if fmt != "wav":
+        wav_destination.unlink(missing_ok=True)
+    filename = destination.name
     return {
         "filename": filename,
         "duration": duration,

@@ -27,7 +27,7 @@ class GenerationOptions(BaseModel):
     seed: int = Field(0, ge=0, le=2_147_483_647)
     split_text: bool = True
     chunk_words: int = Field(50, ge=25, le=250)
-    output_format: Literal["wav"] = "wav"
+    output_format: Literal["wav", "mp3", "m4a", "flac"] = "wav"
     senior_pace_profile: Literal["60s", "70s", "80s", "90plus"] = "70s"
     quality_gate: bool = False
     speaker_consistency: bool = False
@@ -65,6 +65,7 @@ class CutRequest(BaseModel):
     start_seconds: float = Field(0.0, ge=0.0)
     end_seconds: float | None = Field(None, gt=0.0)
     filename_prefix: str = Field("Selected", max_length=80)
+    output_format: Literal["wav", "mp3", "m4a", "flac"] = "wav"
 
 
 

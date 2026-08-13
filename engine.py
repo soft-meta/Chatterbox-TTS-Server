@@ -44,9 +44,9 @@ def _turbo_creator_sampling(
     effective_temperature = _clamp(
         base_temperature + (0.12 * expression) - (0.06 * guidance), 0.05, 2.0
     )
-    effective_top_p = _clamp(
-        base_top_p + (0.05 * expression) - (0.03 * guidance), 0.10, 1.0
-    )
+    # Keep Top P at the model's stable hidden default. The creator asked to remove
+    # Top P as a tuning dimension, so Exaggeration/CFG only nudge Temperature.
+    effective_top_p = base_top_p
     return round(effective_temperature, 4), round(effective_top_p, 4)
 
 

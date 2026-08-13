@@ -9,7 +9,7 @@ def test_server_and_ui_are_fresh_turbo_only():
     server = (ROOT/'server.py').read_text()
     html = (ROOT/'ui/index.html').read_text()
     js = (ROOT/'ui/app.js').read_text()
-    assert 'APP_VERSION = "1.6.4"' in server
+    assert 'APP_VERSION = "1.6.6"' in server
     assert '"id": "chatterbox-turbo"' in server
     # Only Turbo is advertised as a selectable model.
     model_block = server.split('MODELS =',1)[1].split('PRESETS =',1)[0]
@@ -28,7 +28,7 @@ def test_config_matches_official_turbo_sampling_defaults_and_no_qc():
     d = cfg['generation_defaults']
     assert d['preset'] == 'Motivational Speech'
     assert d['temperature'] == 0.72
-    assert d['top_p'] == 0.90
+    assert d['top_p'] == 0.95
     assert d['top_k'] == 1000
     assert d['repetition_penalty'] == 1.2
     assert d['min_p'] == 0.0
@@ -55,11 +55,11 @@ def test_generate_audio_backend_forces_fresh_turbo_profile():
     )
     o = QueueManager._effective_options(req)
     assert o['model'] == 'chatterbox-turbo'
-    # Explicit supported Turbo controls are now creator-tunable.
+    # Only the four requested creator controls are accepted from UI/API overrides.
     assert o['temperature'] == 1.8
-    assert o['top_p'] == 0.2
-    assert o['top_k'] == 5
-    assert o['repetition_penalty'] == 2.3
+    assert o['top_p'] == 0.95
+    assert o['top_k'] == 1000
+    assert o['repetition_penalty'] == 1.2
     assert o['min_p'] == 0.0
     assert o['speed_factor'] == 1.7
     assert o['exaggeration'] == 0.5

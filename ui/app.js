@@ -4,6 +4,7 @@
   const MAX_TABS = 5;
   const STORAGE_KEY = 'softMetaChatterboxTabsV12';
   const FLOATING_POSITION_KEY = 'softMetaChatterboxFloatingProgressV1';
+  const QUEUE_ORDER_KEY = 'softMetaChatterboxQueueOrderV1';
   const THEME_KEY = 'softMetaChatterboxTheme';
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
@@ -19,6 +20,8 @@
     monitorOpen: false,
     emotionTimers: new Map(),
     emotionRequestSerial: 0,
+    queueOrder: [],
+    queueDragId: '',
   };
 
   function createId() {
@@ -42,13 +45,7 @@
       temperature: defaults.temperature ?? 0.72,
       exaggeration: defaults.exaggeration ?? 0.5,
       cfg_weight: defaults.cfg_weight ?? 0.0,
-      repetition_penalty: defaults.repetition_penalty ?? 1.2,
-      min_p: 0.0,
-      top_p: defaults.top_p ?? 0.90,
-      top_k: defaults.top_k ?? 1000,
       speed_factor: defaults.speed_factor ?? 0.93,
-      inter_chunk_pause_ms: defaults.inter_chunk_pause_ms ?? 140,
-      seed: defaults.seed ?? 0,
       split_text: defaults.split_text ?? true,
       chunk_words: defaults.chunk_words ?? 50,
       output_format: defaults.output_format || 'wav',
@@ -354,7 +351,7 @@
   function fillPanel(tab) {
     const panel = tab.panel;
     const stringFields = ['title', 'text', 'preset', 'language', 'voice_filename', 'output_format', 'senior_pace_profile', 'cut_start', 'cut_end'];
-    const numberFields = ['temperature', 'exaggeration', 'cfg_weight', 'repetition_penalty', 'top_p', 'top_k', 'speed_factor', 'seed', 'chunk_words'];
+    const numberFields = ['temperature', 'exaggeration', 'cfg_weight', 'speed_factor', 'chunk_words'];
     stringFields.forEach(name => {
       const element = field(panel, name);
       if (element && tab[name] !== undefined) element.value = tab[name];
@@ -367,13 +364,14 @@
     panel.querySelector('[data-role="word-count"]').textContent = `${countWords(tab.text)} words`;
     panel.querySelector('[data-role="chunk-value"]').textContent = tab.chunk_words;
     panel.querySelector('.audio-number-chip').textContent = `Audio ${tab.number}`;
-    ['temperature', 'exaggeration', 'cfg_weight', 'repetition_penalty', 'top_p', 'speed_factor'].forEach(name => updateSliderOutput(panel, name));
+    ['temperature', 'exaggeration', 'speed_factor', 'cfg_weight'].forEach(name => updateSliderOutput(panel, name));
     updateVoiceControls(tab);
     updatePresetChips(tab);
     renderEmotionStatus(tab);
     const job = tab.job_id ? state.jobs.get(tab.job_id) : null;
     if (job?.status === 'completed') showGenerated(tab, job);
     updateAutoEmotionToggleState(tab);
+    updateDownloadFormatLabels(tab, job);
   }
 
   function captureTab(tab) {
@@ -383,7 +381,7 @@
       const element = field(panel, name);
       if (element) tab[name] = element.value;
     });
-    ['temperature', 'exaggeration', 'cfg_weight', 'repetition_penalty', 'top_p', 'top_k', 'speed_factor', 'seed', 'chunk_words'].forEach(name => {
+    ['temperature', 'exaggeration', 'cfg_weight', 'speed_factor', 'chunk_words'].forEach(name => {
       const element = field(panel, name);
       if (element) tab[name] = Number(element.value);
     });
@@ -574,11 +572,12 @@
       if (event.target.matches('[data-field="chunk_words"]')) {
         panel.querySelector('[data-role="chunk-value"]').textContent = event.target.value;
       }
-      if (event.target.matches('[data-field="temperature"], [data-field="exaggeration"], [data-field="cfg_weight"], [data-field="repetition_penalty"], [data-field="top_p"], [data-field="speed_factor"]')) {
+      if (event.target.matches('[data-field="temperature"], [data-field="exaggeration"], [data-field="cfg_weight"], [data-field="speed_factor"]')) {
         updateSliderOutput(panel, event.target.dataset.field);
       }
       captureTab(tab);
       saveTabs();
+      if (event.target.matches('[data-field="output_format"]')) updateDownloadFormatLabels(tab, tab.job_id ? state.jobs.get(tab.job_id) : null);
       if (event.target.matches('[data-field="text"]')) scheduleEmotionAnalysis(tab, { immediate: event.inputType === 'insertFromPaste' });
       updateCutSummary(tab);
     });
@@ -630,16 +629,10 @@
       temperature: Number(tab.temperature),
       exaggeration: Number(tab.exaggeration),
       cfg_weight: Number(tab.cfg_weight),
-      repetition_penalty: Number(tab.repetition_penalty),
-      min_p: 0.0,
-      top_p: Number(tab.top_p),
-      top_k: Number(tab.top_k),
       speed_factor: Number(tab.speed_factor),
-      inter_chunk_pause_ms: Number(tab.inter_chunk_pause_ms ?? 140),
-      seed: Number(tab.seed || 0),
       split_text: true,
       chunk_words: 50,
-      output_format: 'wav',
+      output_format: tab.output_format || 'wav',
       senior_pace_profile: '70s',
       quality_gate: false,
       speaker_consistency: false,
@@ -759,6 +752,8 @@
         body: JSON.stringify({ delete_files: true }),
       });
       state.jobs.clear();
+      state.queueOrder = [];
+      saveQueueOrder();
       state.tabs = [defaultTab(1)];
       state.activeId = state.tabs[0].id;
       localStorage.removeItem(STORAGE_KEY);
@@ -866,11 +861,46 @@
     state.pollTimer = setTimeout(refreshJobs, delay);
   }
 
-  function monitorJobList() {
-    return [...state.jobs.values()]
+  function loadQueueOrder() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(QUEUE_ORDER_KEY) || '[]');
+      state.queueOrder = Array.isArray(saved) ? saved.filter(id => typeof id === 'string') : [];
+    } catch (_) {
+      state.queueOrder = [];
+    }
+  }
+
+  function saveQueueOrder() {
+    localStorage.setItem(QUEUE_ORDER_KEY, JSON.stringify(state.queueOrder));
+  }
+
+  function reconcileQueueOrder() {
+    const visibleIds = [...state.jobs.values()]
       .filter(job => !job.monitor_dismissed)
       .sort((a, b) => (b.created_at || 0) - (a.created_at || 0))
-      .slice(0, 20);
+      .map(job => job.id);
+    const known = state.queueOrder.filter(id => visibleIds.includes(id));
+    const fresh = visibleIds.filter(id => !known.includes(id));
+    state.queueOrder = [...fresh, ...known];
+    saveQueueOrder();
+  }
+
+  function moveQueueCard(dragId, targetId) {
+    if (!dragId || !targetId || dragId === targetId) return;
+    reconcileQueueOrder();
+    const order = state.queueOrder.filter(id => id !== dragId);
+    const targetIndex = order.indexOf(targetId);
+    if (targetIndex < 0) return;
+    order.splice(targetIndex, 0, dragId);
+    state.queueOrder = order;
+    saveQueueOrder();
+    renderQueue();
+  }
+
+  function monitorJobList() {
+    reconcileQueueOrder();
+    const byId = new Map([...state.jobs.values()].filter(job => !job.monitor_dismissed).map(job => [job.id, job]));
+    return state.queueOrder.map(id => byId.get(id)).filter(Boolean).slice(0, 20);
   }
 
   function createActionButton(label, handler, primary = false) {
@@ -897,6 +927,36 @@
     jobs.forEach(job => {
       const card = document.createElement('article');
       card.className = 'queue-card';
+      const terminal = ['completed', 'failed', 'cancelled', 'interrupted'].includes(job.status);
+      if (terminal) {
+        card.draggable = true;
+        card.dataset.jobId = job.id;
+        card.title = 'Drag to reorder this completed audio card';
+        card.addEventListener('dragstart', event => {
+          if (event.target.closest('button, a, audio, input, select')) { event.preventDefault(); return; }
+          state.queueDragId = job.id;
+          card.classList.add('dragging');
+          event.dataTransfer.effectAllowed = 'move';
+          event.dataTransfer.setData('text/plain', job.id);
+        });
+        card.addEventListener('dragend', () => {
+          state.queueDragId = '';
+          card.classList.remove('dragging');
+          $$('.queue-card.drag-over').forEach(item => item.classList.remove('drag-over'));
+        });
+        card.addEventListener('dragover', event => {
+          if (!state.queueDragId || state.queueDragId === job.id) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'move';
+          card.classList.add('drag-over');
+        });
+        card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
+        card.addEventListener('drop', event => {
+          event.preventDefault();
+          card.classList.remove('drag-over');
+          moveQueueCard(state.queueDragId || event.dataTransfer.getData('text/plain'), job.id);
+        });
+      }
 
       const head = document.createElement('div');
       head.className = 'queue-card-head';
@@ -958,8 +1018,9 @@
         );
         const download = document.createElement('a');
         download.className = 'button button-secondary';
-        download.textContent = 'Download WAV';
-        download.href = `/api/jobs/${job.id}/download`;
+        const jobFormat = String(job.options?.output_format || 'wav').toLowerCase();
+        download.textContent = `Download ${jobFormat.toUpperCase()}`;
+        download.href = `/api/jobs/${job.id}/download?format=${encodeURIComponent(jobFormat)}`;
         download.download = '';
         actions.append(download);
       } else if (!['failed', 'cancelled', 'interrupted'].includes(job.status)) {
@@ -1171,9 +1232,30 @@
     }
   }
 
+  function updateDownloadFormatLabels(tab, job = null) {
+    if (!tab?.panel) return;
+    const fmt = String(tab.output_format || job?.options?.output_format || 'wav').toLowerCase();
+    const label = fmt.toUpperCase();
+    const full = tab.panel.querySelector('[data-role="download-original"]');
+    if (full && (job || tab.job_id)) {
+      const jobId = job?.id || tab.job_id;
+      full.textContent = `Download ${label}`;
+      full.href = `/api/jobs/${jobId}/download?format=${encodeURIComponent(fmt)}`;
+      full.download = '';
+    }
+    const selected = tab.panel.querySelector('[data-action="download-selected"]');
+    if (selected) selected.textContent = `Download Selected ${label}`;
+    const partOne = tab.panel.querySelector('[data-action="download-part-one"]');
+    if (partOne) partOne.textContent = `Download Part 1 ${label}`;
+    const partTwo = tab.panel.querySelector('[data-action="download-part-two"]');
+    if (partTwo) partTwo.textContent = `Download Part 2 ${label}`;
+  }
+
   async function showGenerated(tab, job) {
-    if (!tab.panel || tab.panel.dataset.generatedJob === job.id) return;
+    if (!tab.panel) return;
     const panel = tab.panel;
+    updateDownloadFormatLabels(tab, job);
+    if (panel.dataset.generatedJob === job.id) return;
     const section = panel.querySelector('[data-role="generated"]');
     section.classList.remove('hidden');
     panel.dataset.generatedJob = job.id;
@@ -1184,8 +1266,7 @@
     player.src = audioUrl;
     wirePlayback(tab);
     const download = panel.querySelector('[data-role="download-original"]');
-    download.href = `/api/jobs/${job.id}/download`;
-    download.download = '';
+    updateDownloadFormatLabels(tab, job);
     const assets = [
       ['download-video-master', job.video_master_filename, `/api/jobs/${job.id}/asset/video-master`],
       ['download-srt', job.srt_filename, `/api/jobs/${job.id}/asset/srt`],
@@ -1498,6 +1579,7 @@
           start_seconds: start,
           end_seconds: end,
           filename_prefix: prefix,
+          output_format: tab.output_format || 'wav',
         }),
       });
       if (!data.download_url) throw new Error('The server did not return a download URL.');
@@ -1570,6 +1652,7 @@
       disconnectButton.addEventListener('click', disconnectColabRuntime);
     }
 
+    loadQueueOrder();
     restoreTabs();
     buildTabs();
     state.tabs.forEach(tab => scheduleEmotionAnalysis(tab, { immediate: true }));

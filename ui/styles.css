@@ -411,6 +411,12 @@ html.dark .voice-designer { border-color: #4b477c; background: #252948; }
 .queue-list { display: grid; gap: 10px; margin-top: 17px; }
 .queue-empty { padding: 36px 20px; border: 1px dashed var(--border); border-radius: 9px; color: var(--muted); text-align: center; }
 .queue-card { padding: 13px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-soft); }
+.queue-card[draggable="true"] { cursor: grab; transition: transform .14s ease, box-shadow .14s ease, border-color .14s ease, opacity .14s ease; }
+.queue-card[draggable="true"]:hover { border-color: color-mix(in srgb, var(--primary) 34%, var(--border)); }
+.queue-card.dragging { opacity: .62; cursor: grabbing; transform: scale(.995); border-color: var(--primary); box-shadow: 0 14px 32px rgba(15, 23, 42, .16), 0 0 0 3px var(--primary-ring); }
+.queue-card.drag-over { border-color: var(--primary); box-shadow: 0 -3px 0 var(--primary), 0 10px 26px rgba(15, 23, 42, .12); transform: translateY(2px); }
+.output-format-grid { grid-template-columns: minmax(220px, 340px); }
+
 .queue-card-head { display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; }
 .queue-audio-label { color: var(--primary-dark); font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
 .queue-title { margin-top: 2px; font-weight: 750; user-select: text; cursor: text; word-break: break-word; }

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f7f9fc">
   <title>SoftMeta Chatterbox TTS Server</title>
-  <link rel="stylesheet" href="/static/styles.css?v=1.6.4">
+  <link rel="stylesheet" href="/static/styles.css?v=1.6.6">
 </head>
 <body>
   <header class="app-header">
@@ -72,7 +72,7 @@
   </main>
 
   <footer class="app-footer">
-    <span><a href="https://github.com/soft-meta/chatterbox-v2" target="_blank" rel="noopener">SoftMeta Chatterbox TTS</a> Server v1.6.4</span>
+    <span><a href="https://github.com/soft-meta/chatterbox-v2" target="_blank" rel="noopener">SoftMeta Chatterbox TTS</a> Server v1.6.6</span>
     <span>Powered by the official open-source Chatterbox engine</span>
   </footer>
 
@@ -195,46 +195,26 @@
             <input data-field="temperature" type="range" min="0.05" max="2" step="0.05">
           </label>
           <label class="slider-field">
-            <span><b>Top P</b><output data-output="top_p"></output></span>
-            <input data-field="top_p" type="range" min="0.10" max="1" step="0.05">
-          </label>
-          <label class="slider-field">
-            <span><b>Repetition Penalty</b><output data-output="repetition_penalty"></output></span>
-            <input data-field="repetition_penalty" type="range" min="1" max="2" step="0.05">
+            <span><b>Exaggeration</b><output data-output="exaggeration"></output></span>
+            <input data-field="exaggeration" type="range" min="0" max="2" step="0.05">
           </label>
           <label class="slider-field">
             <span><b>Speed Factor</b><output data-output="speed_factor"></output></span>
             <input data-field="speed_factor" type="range" min="0.80" max="1.20" step="0.01">
           </label>
           <label class="slider-field">
-            <span><b>Exaggeration</b><output data-output="exaggeration"></output></span>
-            <input data-field="exaggeration" type="range" min="0" max="2" step="0.05">
-          </label>
-          <label class="slider-field">
             <span><b>CFG Weight</b><output data-output="cfg_weight"></output></span>
             <input data-field="cfg_weight" type="range" min="0" max="1" step="0.05">
           </label>
         </div>
-        <div class="parameter-bottom-grid">
-          <label class="field">
-            <span>Top K</span>
-            <input data-field="top_k" type="number" min="1" max="5000" step="1">
-          </label>
-          <label class="field">
-            <span>Generation Seed</span>
-            <input data-field="seed" type="number" min="0" max="2147483647">
-            <small>0 = random</small>
-          </label>
-          <label class="field">
-            <span>Language</span>
-            <select data-field="language" disabled>
-              <option value="en">US English / English Turbo</option>
-            </select>
-          </label>
+        <div class="parameter-bottom-grid output-format-grid">
           <label class="field">
             <span>Output Format</span>
-            <select data-field="output_format" disabled>
+            <select data-field="output_format">
               <option value="wav">WAV</option>
+              <option value="mp3">MP3</option>
+              <option value="m4a">M4A</option>
+              <option value="flac">FLAC</option>
             </select>
           </label>
         </div>
@@ -247,7 +227,7 @@
             <p data-role="generated-title"></p>
           </div>
           <div class="generated-downloads">
-            <a data-role="download-original" class="button button-secondary" download>Voice WAV</a>
+            <a data-role="download-original" class="button button-secondary" download>Download WAV</a>
             <a data-role="download-video-master" class="button button-secondary hidden" style="display:none" download>Video Master 48k</a>
             <a data-role="download-srt" class="button button-secondary hidden" style="display:none" download>SRT</a>
             <a data-role="download-vtt" class="button button-secondary hidden" style="display:none" download>VTT</a>
@@ -323,6 +303,6 @@
 
 
 
-  <script src="/static/app.js?v=1.6.4" defer></script>
+  <script src="/static/app.js?v=1.6.6" defer></script>
 </body>
 </html>
