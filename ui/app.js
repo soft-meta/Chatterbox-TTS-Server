@@ -46,6 +46,7 @@
       exaggeration: defaults.exaggeration ?? 0.5,
       cfg_weight: defaults.cfg_weight ?? 0.0,
       speed_factor: defaults.speed_factor ?? 0.93,
+      sentence_end_pause_ms: defaults.sentence_end_pause_ms ?? 280,
       split_text: defaults.split_text ?? true,
       chunk_words: defaults.chunk_words ?? 50,
       output_format: defaults.output_format || 'wav',
@@ -345,13 +346,18 @@
   function updateSliderOutput(panel, name) {
     const input = field(panel, name);
     const output = panel.querySelector(`[data-output="${name}"]`);
-    if (input && output) output.value = Number(input.value).toFixed(name === 'speed_factor' ? 2 : 2);
+    if (!input || !output) return;
+    if (name === 'sentence_end_pause_ms') {
+      output.value = `${Math.round(Number(input.value))} ms`;
+      return;
+    }
+    output.value = Number(input.value).toFixed(2);
   }
 
   function fillPanel(tab) {
     const panel = tab.panel;
     const stringFields = ['title', 'text', 'preset', 'language', 'voice_filename', 'output_format', 'senior_pace_profile', 'cut_start', 'cut_end'];
-    const numberFields = ['temperature', 'exaggeration', 'cfg_weight', 'speed_factor', 'chunk_words'];
+    const numberFields = ['temperature', 'exaggeration', 'cfg_weight', 'speed_factor', 'sentence_end_pause_ms', 'chunk_words'];
     stringFields.forEach(name => {
       const element = field(panel, name);
       if (element && tab[name] !== undefined) element.value = tab[name];
@@ -364,7 +370,7 @@
     panel.querySelector('[data-role="word-count"]').textContent = `${countWords(tab.text)} words`;
     panel.querySelector('[data-role="chunk-value"]').textContent = tab.chunk_words;
     panel.querySelector('.audio-number-chip').textContent = `Audio ${tab.number}`;
-    ['temperature', 'exaggeration', 'speed_factor', 'cfg_weight'].forEach(name => updateSliderOutput(panel, name));
+    ['temperature', 'exaggeration', 'speed_factor', 'cfg_weight', 'sentence_end_pause_ms'].forEach(name => updateSliderOutput(panel, name));
     updateVoiceControls(tab);
     updatePresetChips(tab);
     renderEmotionStatus(tab);
@@ -381,7 +387,7 @@
       const element = field(panel, name);
       if (element) tab[name] = element.value;
     });
-    ['temperature', 'exaggeration', 'cfg_weight', 'speed_factor', 'chunk_words'].forEach(name => {
+    ['temperature', 'exaggeration', 'cfg_weight', 'speed_factor', 'sentence_end_pause_ms', 'chunk_words'].forEach(name => {
       const element = field(panel, name);
       if (element) tab[name] = Number(element.value);
     });
@@ -572,7 +578,7 @@
       if (event.target.matches('[data-field="chunk_words"]')) {
         panel.querySelector('[data-role="chunk-value"]').textContent = event.target.value;
       }
-      if (event.target.matches('[data-field="temperature"], [data-field="exaggeration"], [data-field="cfg_weight"], [data-field="speed_factor"]')) {
+      if (event.target.matches('[data-field="temperature"], [data-field="exaggeration"], [data-field="cfg_weight"], [data-field="speed_factor"], [data-field="sentence_end_pause_ms"]')) {
         updateSliderOutput(panel, event.target.dataset.field);
       }
       captureTab(tab);
@@ -630,6 +636,7 @@
       exaggeration: Number(tab.exaggeration),
       cfg_weight: Number(tab.cfg_weight),
       speed_factor: Number(tab.speed_factor),
+      sentence_end_pause_ms: Math.round(Number(tab.sentence_end_pause_ms)),
       split_text: true,
       chunk_words: 50,
       output_format: tab.output_format || 'wav',

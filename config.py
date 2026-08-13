@@ -39,6 +39,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "top_k": 1000,
         "speed_factor": 0.93,
         "inter_chunk_pause_ms": 70,
+        "sentence_end_pause_ms": 280,
         "seed": 0,
         "split_text": True,
         "chunk_words": 50,

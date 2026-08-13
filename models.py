@@ -24,6 +24,7 @@ class GenerationOptions(BaseModel):
     top_k: int = Field(1000, ge=1, le=5000)
     speed_factor: float = Field(1.0, ge=0.5, le=2.0)
     inter_chunk_pause_ms: int = Field(80, ge=0, le=1000)
+    sentence_end_pause_ms: int = Field(280, ge=120, le=600)
     seed: int = Field(0, ge=0, le=2_147_483_647)
     split_text: bool = True
     chunk_words: int = Field(50, ge=25, le=250)

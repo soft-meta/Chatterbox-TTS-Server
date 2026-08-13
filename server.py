@@ -34,7 +34,7 @@ from storage import AUDIO_EXTENSIONS, Storage
 from utils import safe_filename
 
 APP_NAME = "SoftMeta Chatterbox TTS Server"
-APP_VERSION = "1.6.6"
+APP_VERSION = "1.6.7"
 logger = logging.getLogger("softmeta.chatterbox")
 
 config = load_config()
@@ -66,6 +66,7 @@ PRESETS = [
         "top_k": 1000,
         "speed_factor": 0.93,
         "inter_chunk_pause_ms": 70,
+        "sentence_end_pause_ms": 280,
         "seed": 0,
         "split_text": True,
         "chunk_words": 50,
@@ -88,6 +89,7 @@ PRESETS = [
         "top_k": 1000,
         "speed_factor": 1.0,
         "inter_chunk_pause_ms": 80,
+        "sentence_end_pause_ms": 280,
         "seed": 0,
         "split_text": True,
         "chunk_words": 50,

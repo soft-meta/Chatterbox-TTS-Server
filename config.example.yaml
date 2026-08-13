@@ -23,6 +23,7 @@ generation_defaults:
   top_k: 1000
   speed_factor: 0.93
   inter_chunk_pause_ms: 70
+  sentence_end_pause_ms: 280
   seed: 0
   split_text: true
   chunk_words: 50

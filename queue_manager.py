@@ -30,6 +30,7 @@ ACTIVE_STATES = {"queued", "running"}
 # regeneration is performed.
 TURBO_MAX_CHARS = 300
 TURBO_INTER_CHUNK_PAUSE_MS = 70
+DEFAULT_SENTENCE_END_PAUSE_MS = 280
 
 # Official Turbo Gradio defaults (seed 0 means random there).
 OFFICIAL_TURBO_PROFILE: dict[str, Any] = {
@@ -46,6 +47,7 @@ OFFICIAL_TURBO_PROFILE: dict[str, Any] = {
     "split_text": True,
     "chunk_words": 50,        # UI compatibility only; char cap owns splitting
     "inter_chunk_pause_ms": TURBO_INTER_CHUNK_PAUSE_MS,
+    "sentence_end_pause_ms": DEFAULT_SENTENCE_END_PAUSE_MS,
     "output_format": "wav",
     "senior_pace_profile": "70s",  # compatibility only; never applied
     "quality_gate": False,
@@ -67,12 +69,13 @@ MOTIVATIONAL_TURBO_PROFILE: dict[str, Any] = {
     "top_k": 1000,
     "speed_factor": 0.93,
     "inter_chunk_pause_ms": 70,
+    "sentence_end_pause_ms": DEFAULT_SENTENCE_END_PAUSE_MS,
 }
 
 _TURBO_USER_CONTROLS = {
     # Only the four creator-facing controls requested by the user are accepted
     # from the UI. Turbo's other sampling values stay at stable model defaults.
-    "temperature", "exaggeration", "cfg_weight", "speed_factor",
+    "temperature", "exaggeration", "cfg_weight", "speed_factor", "sentence_end_pause_ms",
 }
 
 # Keep the user's current louder delivery while making the processing transparent:
@@ -233,6 +236,8 @@ def compact_excessive_sentence_silence(
             keep_ms = trailing_keep_ms
         else:
             keep_ms = internal_keep_ms
+        run_ms = (end_sample - start_sample) * 1000.0 / sample_rate
+        keep_ms = min(float(keep_ms), run_ms)
         keep_samples = max(0, int(round(sample_rate * keep_ms / 1000.0)))
         if keep_samples:
             parts.append(np.zeros(keep_samples, dtype=np.float32))
@@ -244,7 +249,7 @@ def compact_excessive_sentence_silence(
 class QueueManager:
     """Simple single-GPU Chatterbox Turbo queue.
 
-    v1.6.6 keeps the fast, direct Turbo generation architecture.
+    v1.6.7 keeps the fast, direct Turbo generation architecture.
     The only output processing after model generation is final loudness normalisation.
     """
 
@@ -652,9 +657,17 @@ class QueueManager:
                 if audio.size == 0 or not np.isfinite(audio).all():
                     raise RuntimeError(f"Chatterbox Turbo returned invalid audio for chunk {index}/{len(chunks)}.")
 
-                # Polish only excessive dead-air. Normal punctuation pauses remain
-                # untouched, while rare long sentence gaps are shortened.
-                audio = compact_excessive_sentence_silence(audio, result.sample_rate)
+                # Polish only excessive dead-air. The creator-facing Sentence End
+                # Pause control sets how much of a long internal punctuation pause is
+                # kept. Short natural pauses stay untouched and are never lengthened.
+                sentence_end_pause_ms = int(options.get(
+                    "sentence_end_pause_ms", DEFAULT_SENTENCE_END_PAUSE_MS
+                ))
+                audio = compact_excessive_sentence_silence(
+                    audio,
+                    result.sample_rate,
+                    internal_keep_ms=sentence_end_pause_ms,
+                )
 
                 if output_file is None:
                     output_file = sf.SoundFile(

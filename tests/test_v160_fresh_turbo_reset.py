@@ -9,7 +9,7 @@ def test_server_and_ui_are_fresh_turbo_only():
     server = (ROOT/'server.py').read_text()
     html = (ROOT/'ui/index.html').read_text()
     js = (ROOT/'ui/app.js').read_text()
-    assert 'APP_VERSION = "1.6.6"' in server
+    assert 'APP_VERSION = "1.6.7"' in server
     assert '"id": "chatterbox-turbo"' in server
     # Only Turbo is advertised as a selectable model.
     model_block = server.split('MODELS =',1)[1].split('PRESETS =',1)[0]
