@@ -84,4 +84,4 @@ def test_server_supports_format_aware_full_and_cut_downloads():
 
 def test_version_is_166():
     server = (ROOT / 'server.py').read_text(encoding='utf-8')
-    assert 'APP_VERSION = "1.6.8"' in server
+    assert 'APP_VERSION = "1.6.9"' in server

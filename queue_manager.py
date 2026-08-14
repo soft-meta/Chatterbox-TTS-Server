@@ -229,7 +229,7 @@ def apply_sentence_end_pause(
 ) -> np.ndarray:
     """Normalize actual sentence-ending pauses to the selected duration.
 
-    ``pause_ms`` may be 0..600. The function changes only the strongest internal
+    ``pause_ms`` may be 0..1000. The function changes only the strongest internal
     silence gaps needed for the known number of text sentence boundaries. Shorter
     breath pauses are left intact. Leading/trailing model silence is stripped when
     clearly present so chunk joins can add the requested pause exactly once.
@@ -238,7 +238,7 @@ def apply_sentence_end_pause(
     if data.size == 0 or sample_rate <= 0:
         return data
     data = np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)
-    target_ms = int(max(0, min(600, int(pause_ms))))
+    target_ms = int(max(0, min(1000, int(pause_ms))))
     runs = _silence_runs(data, sample_rate, min_silence_ms=80)
     if not runs:
         return data
@@ -285,7 +285,7 @@ def apply_sentence_end_pause(
 class QueueManager:
     """Simple single-GPU Chatterbox Turbo queue.
 
-    v1.6.8 keeps the fast, direct Turbo generation architecture.
+    v1.6.9 keeps the fast, direct Turbo generation architecture.
     The only output processing after model generation is final loudness normalisation.
     """
 
@@ -694,7 +694,7 @@ class QueueManager:
                     raise RuntimeError(f"Chatterbox Turbo returned invalid audio for chunk {index}/{len(chunks)}.")
 
                 # Apply the creator-selected pause to real sentence boundaries.
-                # Unlike v1.6.7 this is measurable at 0, 350, 600ms etc.
+                # Unlike v1.6.7 this is measurable at 0, 350, 1000ms etc.
                 sentence_end_pause_ms = int(options.get(
                     "sentence_end_pause_ms", DEFAULT_SENTENCE_END_PAUSE_MS
                 ))

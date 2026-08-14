@@ -39,7 +39,7 @@ def test_queue_manager_reads_sentence_end_pause_option():
 
 def test_version_is_167():
     source = (ROOT / 'server.py').read_text(encoding='utf-8')
-    assert 'APP_VERSION = "1.6.8"' in source
+    assert 'APP_VERSION = "1.6.9"' in source
 
 
 def test_sentence_end_pause_reaches_effective_turbo_options():

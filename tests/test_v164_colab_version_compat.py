@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-NB = ROOT / 'colab' / 'SoftMeta_Chatterbox_TTS_Colab_v1.6.8.ipynb'
+NB = ROOT / 'colab' / 'SoftMeta_Chatterbox_TTS_Colab_v1.6.9.ipynb'
 
 
 def joined_text():
@@ -12,7 +12,7 @@ def joined_text():
 
 def test_colab_does_not_abort_on_exact_server_version_mismatch():
     text = joined_text()
-    assert "assert server.APP_VERSION == '1.6.8'" not in text
+    assert "assert server.APP_VERSION == '1.6.9'" not in text
     assert 'SOFTMETA_MIN_SERVER_VERSION' in text
     assert 'Compatible GitHub server version' in text
     assert 'Notebook/server version difference is compatible' in text
