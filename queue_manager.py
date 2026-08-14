@@ -84,7 +84,7 @@ FINAL_TARGET_LUFS = -12.5
 FINAL_TRUE_PEAK_DBFS = -0.8
 FINAL_LRA = 11.0
 
-_SENTENCE_RE = re.compile(r"(?<=[.!?])(?:[\"'”’)]*)\s+")
+_SENTENCE_BOUNDARY_RE = re.compile(r"[.!?](?:[\"'”’)]*)\s+")
 
 
 def _normalise_space(text: str) -> str:
@@ -142,7 +142,21 @@ def split_turbo_long_text(text: str, max_chars: int = TURBO_MAX_CHARS) -> list[s
     paragraphs = [part.strip() for part in re.split(r"\n\s*\n+", clean) if part.strip()]
     atomic: list[str] = []
     for paragraph in paragraphs:
-        sentences = [part.strip() for part in _SENTENCE_RE.split(paragraph) if part.strip()]
+        sentences: list[str] = []
+        start = 0
+        for match in _SENTENCE_BOUNDARY_RE.finditer(paragraph):
+            # Keep the sentence-ending punctuation and any closing quote/bracket.
+            # Only the following whitespace becomes the boundary between chunks.
+            end = match.end()
+            while end > match.start() and paragraph[end - 1].isspace():
+                end -= 1
+            part = paragraph[start:end].strip()
+            if part:
+                sentences.append(part)
+            start = match.end()
+        tail = paragraph[start:].strip()
+        if tail:
+            sentences.append(tail)
         if not sentences:
             sentences = [paragraph]
         for sentence in sentences:
@@ -182,8 +196,7 @@ def _sentence_boundary_count(text: str) -> int:
     clean = (text or "").strip()
     if not clean:
         return 0
-    parts = [part for part in _SENTENCE_RE.split(clean) if part.strip()]
-    return max(0, len(parts) - 1)
+    return sum(1 for _ in _SENTENCE_BOUNDARY_RE.finditer(clean))
 
 
 def _silence_runs(
@@ -285,7 +298,7 @@ def apply_sentence_end_pause(
 class QueueManager:
     """Simple single-GPU Chatterbox Turbo queue.
 
-    v1.6.9 keeps the fast, direct Turbo generation architecture.
+    v1.6.10 keeps the fast, direct Turbo generation architecture.
     The only output processing after model generation is final loudness normalisation.
     """
 

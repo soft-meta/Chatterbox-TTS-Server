@@ -2,7 +2,7 @@ from pathlib import Path
 import json
 
 ROOT = Path(__file__).resolve().parents[1]
-NB = ROOT / "colab" / "SoftMeta_Chatterbox_TTS_Colab_v1.6.9.ipynb"
+NB = ROOT / "colab" / "SoftMeta_Chatterbox_TTS_Colab_v1.6.10.ipynb"
 
 def text():
     nb=json.loads(NB.read_text(encoding="utf-8"))
@@ -23,5 +23,5 @@ def test_chatterbox_does_not_reresolve_torch_cuda():
 
 def test_notebook_version_is_v165():
     t=text()
-    assert "v1.6.9" in t
-    assert "if sys.argv[1] != '1.6.9'" in t
+    assert "v1.6.10" in t
+    assert "if sys.argv[1] != '1.6.10'" in t

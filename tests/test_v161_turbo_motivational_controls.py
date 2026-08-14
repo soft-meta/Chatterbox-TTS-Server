@@ -11,7 +11,7 @@ def test_v161_exposes_motivational_preset_and_turbo_controls():
     server = (ROOT/'server.py').read_text(encoding='utf-8')
     html = (ROOT/'ui/index.html').read_text(encoding='utf-8')
     js = (ROOT/'ui/app.js').read_text(encoding='utf-8')
-    assert 'APP_VERSION = "1.6.9"' in server
+    assert 'APP_VERSION = "1.6.10"' in server
     assert '"name": "Motivational Speech"' in server
     assert '<section class="preset-section">' in html
     assert '<details class="parameters-panel"' in html

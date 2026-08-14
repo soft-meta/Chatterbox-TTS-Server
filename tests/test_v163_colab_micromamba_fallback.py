@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-NB = ROOT / 'colab' / 'SoftMeta_Chatterbox_TTS_Colab_v1.6.9.ipynb'
+NB = ROOT / 'colab' / 'SoftMeta_Chatterbox_TTS_Colab_v1.6.10.ipynb'
 
 
 def notebook_text():
